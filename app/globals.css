@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@keyframes fadeInTab {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes slideInNotif {
+  from { opacity: 0; transform: translateY(-10px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ─── Bottom nav (mobile only) ─────────────────────── */
+.portal-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  height: 62px;
+  align-items: stretch;
+  justify-content: space-around;
+}
+
+/* ─── Mobile  ≤ 767px ───────────────────────────────── */
+@media (max-width: 767px) {
+  .portal-sidebar       { display: none !important; }
+  .portal-content       { margin-left: 0 !important; padding: 20px 14px 80px 14px !important; }
+  .stat-grid-main       { grid-template-columns: repeat(2, 1fr) !important; }
+  .two-col-split        { grid-template-columns: 1fr !important; }
+  .login-grid           { grid-template-columns: 1fr !important; max-width: 440px !important; border-radius: 20px !important; }
+  .login-brand-panel    { display: none !important; }
+  .login-form-panel     { border-radius: 20px !important; }
+  .portal-bottom-nav    { display: flex !important; }
+}
+
+/* ─── Tablet  768px – 1023px ────────────────────────── */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .portal-content   { padding: 24px 20px 40px 20px !important; }
+  .stat-grid-main   { grid-template-columns: repeat(3, 1fr) !important; }
+  .two-col-split    { grid-template-columns: 1fr !important; }
+}
