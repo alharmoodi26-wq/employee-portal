@@ -229,6 +229,7 @@ function InvoiceCard({
   const [deleting, setDeleting] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const theme = getThemePalette();
+  const isMobile = useIsMobile();
 
   const accentColor =
     item.status === "Paid" ? "#10b981"
@@ -244,6 +245,17 @@ function InvoiceCard({
     }
   };
 
+  const actionButtons = (
+    <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+      {(item.attachmentPath || item.attachmentLink) && (
+        <button title="View Attachment" style={invoiceIconBtn(theme)} onClick={() => onOpenInvoiceAttachment(item.attachmentPath, item.attachmentLink)}>📎</button>
+      )}
+      <button title="Edit" style={invoiceIconBtn(theme)} onClick={() => onEdit(item)}>✏️</button>
+      <button title="Delete" style={{ ...invoiceIconBtn(theme), color: "#ef4444", opacity: deleting ? 0.6 : 1 }} onClick={handleDelete} disabled={deleting}>{deleting ? "…" : "🗑"}</button>
+      <button title={expanded ? "Collapse" : "Expand"} style={{ ...invoiceIconBtn(theme), fontSize: 11, color: theme.subtleText }} onClick={() => setExpanded(!expanded)}>{expanded ? "▲" : "▼"}</button>
+    </div>
+  );
+
   return (
     <div style={{
       background: theme.cardBackground,
@@ -253,51 +265,37 @@ function InvoiceCard({
       overflow: "hidden",
       transition: "box-shadow 0.15s ease",
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-          background: `${accentColor}22`,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 16,
-        }}>🧾</div>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {item.supplierName}
+      {isMobile ? (
+        <div style={{ padding: "12px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: `${accentColor}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🧾</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.supplierName}</div>
+            </div>
+            <span style={getInvoiceBadgeStyle(item.status)}>{item.status}</span>
           </div>
-          <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: theme.subtleText, marginBottom: 8, paddingLeft: 42 }}>
             Received: {item.dateReceived || "—"}{item.dateApproved ? ` · Approved: ${item.dateApproved}` : ""}
           </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingLeft: 42 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: theme.title }}>AED {formatMoney(item.totalAmount)}</div>
+            {actionButtons}
+          </div>
         </div>
-
-        <div style={{ fontWeight: 800, fontSize: 15, color: theme.title, flexShrink: 0 }}>
-          AED {formatMoney(item.totalAmount)}
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: `${accentColor}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🧾</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.supplierName}</div>
+            <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
+              Received: {item.dateReceived || "—"}{item.dateApproved ? ` · Approved: ${item.dateApproved}` : ""}
+            </div>
+          </div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: theme.title, flexShrink: 0 }}>AED {formatMoney(item.totalAmount)}</div>
+          <span style={getInvoiceBadgeStyle(item.status)}>{item.status}</span>
+          {actionButtons}
         </div>
-
-        <span style={getInvoiceBadgeStyle(item.status)}>{item.status}</span>
-
-        <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-          {(item.attachmentPath || item.attachmentLink) && (
-            <button
-              title="View Attachment"
-              style={invoiceIconBtn(theme)}
-              onClick={() => onOpenInvoiceAttachment(item.attachmentPath, item.attachmentLink)}
-            >📎</button>
-          )}
-          <button title="Edit" style={invoiceIconBtn(theme)} onClick={() => onEdit(item)}>✏️</button>
-          <button
-            title="Delete"
-            style={{ ...invoiceIconBtn(theme), color: "#ef4444", opacity: deleting ? 0.6 : 1 }}
-            onClick={handleDelete}
-            disabled={deleting}
-          >{deleting ? "…" : "🗑"}</button>
-          <button
-            title={expanded ? "Collapse" : "Expand"}
-            style={{ ...invoiceIconBtn(theme), fontSize: 11, color: theme.subtleText }}
-            onClick={() => setExpanded(!expanded)}
-          >{expanded ? "▲" : "▼"}</button>
-        </div>
-      </div>
+      )}
 
       {expanded && (
         <div style={{
@@ -1343,7 +1341,7 @@ export default function EmployeeDashboard({
                     </div>
                     <button onClick={() => setActiveTab("tasks")} style={{ fontSize: 12, color: "#3b82f6", background: "none", border: "none", cursor: "pointer", fontWeight: 700, padding: 0 }}>View All →</button>
                   </div>
-                  <div style={{ padding: "12px 16px", display: "grid", gap: 10, maxHeight: 300, overflowY: "auto" }}>
+                  <div className="task-work-scroll" style={{ padding: "12px 16px", display: "grid", gap: 10, maxHeight: 300, overflowY: "auto" }}>
                     {activeTasks.length > 0 ? activeTasks.slice(0, 5).map((task) => (
                       <TaskCard key={task.id} task={task} onSubmitTask={onSubmitTask} showToast={showToast} />
                     )) : (
@@ -1371,7 +1369,7 @@ export default function EmployeeDashboard({
                     </div>
                     <button onClick={() => setActiveTab("works")} style={{ fontSize: 12, color: "#f59e0b", background: "none", border: "none", cursor: "pointer", fontWeight: 700, padding: 0 }}>View All →</button>
                   </div>
-                  <div style={{ padding: "12px 16px", display: "grid", gap: 10, maxHeight: 300, overflowY: "auto" }}>
+                  <div className="task-work-scroll" style={{ padding: "12px 16px", display: "grid", gap: 10, maxHeight: 300, overflowY: "auto" }}>
                     {nonApprovedWorks.length > 0 ? nonApprovedWorks.slice(0, 5).map((item) => (
                       <WorkCard key={item.id} item={item} />
                     )) : (

@@ -654,11 +654,25 @@ function InvoiceReviewCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const theme = getThemePalette();
+  const isMobile = useIsMobile();
 
   const accentColor =
     item.status === "Paid" ? "#10b981"
     : item.status === "Approved" ? "#3b82f6"
     : "#f59e0b";
+
+  const actionButtons = (
+    <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
+      {item.status === "Pending Review" && (
+        <button title="Approve" style={{ ...invoiceIconBtn(theme), background: "rgba(16,185,129,0.14)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }} onClick={() => onApprove(item)}>✓</button>
+      )}
+      {(item.attachmentPath || item.attachmentLink) && (
+        <button title="View Attachment" style={invoiceIconBtn(theme)} onClick={() => onOpenAttachment(item.attachmentPath, item.attachmentLink)}>📎</button>
+      )}
+      <button title="Edit" style={invoiceIconBtn(theme)} onClick={() => onEdit(item)}>✏️</button>
+      <button title={expanded ? "Collapse" : "Expand"} style={{ ...invoiceIconBtn(theme), fontSize: 11, color: theme.subtleText }} onClick={() => setExpanded(!expanded)}>{expanded ? "▲" : "▼"}</button>
+    </div>
+  );
 
   return (
     <div style={{
@@ -671,47 +685,37 @@ function InvoiceReviewCard({
       overflow: "hidden",
       transition: "box-shadow 0.15s ease",
     }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
-        <div style={{
-          width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-          background: `${accentColor}22`,
-          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16,
-        }}>🧾</div>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {item.supplierName}
+      {isMobile ? (
+        <div style={{ padding: "12px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: `${accentColor}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🧾</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.supplierName}</div>
+            </div>
+            <span style={getInvoiceBadgeStyle(item.status)}>{item.status}</span>
           </div>
-          <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
-            👤 {item.employeeName}{item.dateReceived ? ` · Received: ${item.dateReceived}` : ""}
+          <div style={{ fontSize: 12, color: theme.subtleText, marginBottom: 8, paddingLeft: 42 }}>
+            👤 {item.employeeName}{item.dateReceived ? ` · ${item.dateReceived}` : ""}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingLeft: 42 }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: theme.title }}>AED {formatMoney(item.totalAmount)}</div>
+            {actionButtons}
           </div>
         </div>
-
-        <div style={{ fontWeight: 800, fontSize: 15, color: theme.title, flexShrink: 0 }}>
-          AED {formatMoney(item.totalAmount)}
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: `${accentColor}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🧾</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.supplierName}</div>
+            <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
+              👤 {item.employeeName}{item.dateReceived ? ` · Received: ${item.dateReceived}` : ""}
+            </div>
+          </div>
+          <div style={{ fontWeight: 800, fontSize: 15, color: theme.title, flexShrink: 0 }}>AED {formatMoney(item.totalAmount)}</div>
+          <span style={getInvoiceBadgeStyle(item.status)}>{item.status}</span>
+          {actionButtons}
         </div>
-
-        <span style={getInvoiceBadgeStyle(item.status)}>{item.status}</span>
-
-        <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-          {item.status === "Pending Review" && (
-            <button
-              title="Approve"
-              style={{ ...invoiceIconBtn(theme), background: "rgba(16,185,129,0.14)", color: "#10b981", border: "1px solid rgba(16,185,129,0.3)" }}
-              onClick={() => onApprove(item)}
-            >✓</button>
-          )}
-          {(item.attachmentPath || item.attachmentLink) && (
-            <button title="View Attachment" style={invoiceIconBtn(theme)} onClick={() => onOpenAttachment(item.attachmentPath, item.attachmentLink)}>📎</button>
-          )}
-          <button title="Edit" style={invoiceIconBtn(theme)} onClick={() => onEdit(item)}>✏️</button>
-          <button
-            title={expanded ? "Collapse" : "Expand"}
-            style={{ ...invoiceIconBtn(theme), fontSize: 11, color: theme.subtleText }}
-            onClick={() => setExpanded(!expanded)}
-          >{expanded ? "▲" : "▼"}</button>
-        </div>
-      </div>
+      )}
 
       {expanded && (
         <div style={{
@@ -2597,7 +2601,7 @@ export default function AdminDashboard({
             <div style={{ display: "grid", gap: 16 }}>
 
               {/* Stats strip */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+              <div className="stat-grid-main" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
                 {[
                   { label: "Total Employees", value: employeeList.length, color: "#6366f1", icon: "👥" },
                   { label: "Total Tasks", value: activeTasksAll.filter(t => !t.isDeleted).length, color: "#3b82f6", icon: "📋" },
@@ -2626,7 +2630,7 @@ export default function AdminDashboard({
               {employeeList.length === 0 ? (
                 <EmptyState icon="👥" title="No employees found" description="Add employees to the system to manage their tasks, works, and attendance." />
               ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                <div className="employee-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                   {employeeList
                     .filter(e => !employeeSearch.trim() || [e.name, e.position, e.department].some(f => f.toLowerCase().includes(employeeSearch.trim().toLowerCase())))
                     .map(employee => {
