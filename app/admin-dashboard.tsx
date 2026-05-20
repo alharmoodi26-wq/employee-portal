@@ -2196,7 +2196,7 @@ export default function AdminDashboard({
             <div style={{ display: "grid", gap: 20 }}>
 
               {/* Tab switcher as stat tiles */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              <div className="review-filter-tiles" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                 {([
                   { key: "pending", label: "Pending Review", count: pendingCount, icon: "⏳", color: "#f59e0b", bg: "#f59e0b" },
                   { key: "active",  label: "Active Tasks",   count: assignedTasksOnly.length, icon: "🔵", color: "#3b82f6", bg: "#3b82f6" },
@@ -2234,7 +2234,7 @@ export default function AdminDashboard({
               </div>
 
               {/* Search + department filter */}
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+              <div className="review-search-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
                 <input
                   style={inputStyle()}
                   value={search}
@@ -2706,7 +2706,7 @@ export default function AdminDashboard({
                     ) : (
                       <AvatarInitials name={selectedEmployee.name} size={72} />
                     )}
-                    <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 22, fontWeight: 900, color: theme.title }}>{selectedEmployee.name}</div>
                       <div style={{ fontSize: 14, color: theme.subtleText, marginTop: 3 }}>{selectedEmployee.position} · {selectedEmployee.department}</div>
                       <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>✉ {selectedEmployee.email}</div>
@@ -2724,7 +2724,7 @@ export default function AdminDashboard({
                         ))}
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+                    <div className="emp-profile-actions" style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
                       <button style={buttonStyle(false)} onClick={() => { setSelectedEmployee(null); setEmployeeProfileTab("overview"); setEmployeeSearch(""); }}>← Back</button>
                       <button style={buttonStyle(true)} onClick={() => setEmployeeProfileTab("assign")}>+ Assign Task</button>
                       {selectedEmployeeReport && (
@@ -2759,7 +2759,7 @@ export default function AdminDashboard({
                   {/* Info grid */}
                   <div style={{ ...cardStyle(), padding: "18px 22px" }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: theme.subtleText, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 14 }}>Employee Information</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
+                    <div className="emp-info-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14 }}>
                       {[
                         { label: "Full Name", value: selectedEmployee.name },
                         { label: "Department", value: selectedEmployee.department },
@@ -2775,7 +2775,7 @@ export default function AdminDashboard({
                   </div>
 
                   {/* Stat tiles */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                  <div className="emp-stat-tiles" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
                     {[
                       { label: "Total Tasks", value: selectedEmployeeTasks.length, color: "#3b82f6" },
                       { label: "Total Works", value: selectedEmployeeWorks.length, color: "#10b981" },

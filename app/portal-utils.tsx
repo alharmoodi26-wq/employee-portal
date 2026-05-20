@@ -1208,6 +1208,7 @@ export function WorkCard({
   detailsOnly?: boolean;
 }) {
   const theme = getThemePalette();
+  const isMobile = useIsMobile();
   const [hovered, setHovered] = useState(false);
   const [expanded, setExpanded] = useState(initialExpanded ?? false);
 
@@ -1218,7 +1219,7 @@ export function WorkCard({
       gap: 14,
     }}>
       {/* Metadata grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 8 }}>
         {[
           { label: "Category", value: item.category || "—", icon: "🏷" },
           { label: "Department", value: item.department || "—", icon: "🏢" },
@@ -1357,7 +1358,7 @@ export function WorkCard({
           flexWrap: "wrap",
         }}
       >
-        <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
               fontSize: 18,
@@ -1374,7 +1375,7 @@ export function WorkCard({
           </div>
         </div>
 
-        <div style={{ display: "grid", gap: 8, minWidth: 190 }}>
+        <div style={{ display: "grid", gap: 8, minWidth: isMobile ? 0 : 190, flexShrink: 0 }}>
           <span style={badgeStyle(item.status)}>{item.status}</span>
           <button style={smallButtonStyle()} onClick={() => setExpanded((prev) => !prev)}>
             {expanded ? "Hide Details" : "View Details"}
@@ -1409,6 +1410,7 @@ export function TaskCard({
   detailsOnly?: boolean;
 }) {
   const theme = getThemePalette();
+  const isMobile = useIsMobile();
   const [submittedNotes, setSubmittedNotes] = useState(task.submittedNotes || "");
   const [submittedFilesInput, setSubmittedFilesInput] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -1468,7 +1470,7 @@ export function TaskCard({
       gap: 14,
     }}>
       {/* Metadata grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 8 }}>
         {[
           { label: "Employee",  value: task.employeeName || "—",              icon: "👤" },
           { label: "Deadline",  value: task.deadline || "No deadline",         icon: "📅" },
@@ -1694,7 +1696,7 @@ export function TaskCard({
           alignItems: "flex-start",
         }}
       >
-        <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: theme.title }}>{task.title}</div>
 
           <div style={{ fontSize: 13, color: theme.subtleText, marginTop: 8, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
@@ -1721,7 +1723,7 @@ export function TaskCard({
           </div>
         </div>
 
-        <div style={{ display: "grid", gap: 8, minWidth: 220 }}>
+        <div style={{ display: "grid", gap: 8, minWidth: isMobile ? 0 : 220, flexShrink: 0 }}>
           <span style={badgeStyle(displayStatus)}>{displayStatus}</span>
           <button style={smallButtonStyle()} onClick={() => setExpanded((prev) => !prev)}>
             {expanded ? "Hide Details" : "View Details"}
