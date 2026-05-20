@@ -23,6 +23,11 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  overflow-x: hidden;
+}
+
+html {
+  overflow-x: hidden;
 }
 
 @keyframes fadeInTab {
@@ -40,6 +45,13 @@ body {
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+/* ─── Mobile logout (hidden on desktop) ────────────── */
+.mobile-logout-btn {
+  display: none;
+  align-items: center;
+  gap: 6px;
+}
+
 /* ─── Bottom nav (mobile only) ─────────────────────── */
 .portal-bottom-nav {
   display: none;
@@ -55,14 +67,18 @@ body {
 
 /* ─── Mobile  ≤ 767px ───────────────────────────────── */
 @media (max-width: 767px) {
-  .portal-sidebar       { display: none !important; }
-  .portal-content       { margin-left: 0 !important; padding: 20px 14px 80px 14px !important; }
-  .stat-grid-main       { grid-template-columns: repeat(2, 1fr) !important; }
-  .two-col-split        { grid-template-columns: 1fr !important; }
-  .login-grid           { grid-template-columns: 1fr !important; max-width: 440px !important; border-radius: 20px !important; }
-  .login-brand-panel    { display: none !important; }
-  .login-form-panel     { border-radius: 20px !important; }
-  .portal-bottom-nav    { display: flex !important; }
+  .portal-sidebar         { display: none !important; }
+  .portal-content         { margin-left: 0 !important; padding: 20px 14px 80px 14px !important; }
+  .stat-grid-main         { grid-template-columns: repeat(2, 1fr) !important; }
+  .two-col-split          { grid-template-columns: 1fr !important; }
+  .login-grid             { grid-template-columns: 1fr !important; max-width: 440px !important; border-radius: 20px !important; }
+  .login-brand-panel      { display: none !important; }
+  .login-form-panel       { border-radius: 20px !important; }
+  .portal-bottom-nav      { display: flex !important; }
+  .invoice-stats-grid     { grid-template-columns: repeat(2, 1fr) !important; }
+  .invoice-filter-grid    { grid-template-columns: 1fr !important; }
+  .mobile-logout-btn      { display: flex !important; }
+  .page-header-title      { font-size: 22px !important; }
 }
 
 /* ─── Tablet  768px – 1023px ────────────────────────── */

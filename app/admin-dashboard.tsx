@@ -1910,8 +1910,9 @@ export default function AdminDashboard({
             gap: 12,
           }}
         >
-          <div>
+          <div style={{ flex: 1 }}>
             <h1
+              className="page-header-title"
               style={{
                 fontSize: 28,
                 fontWeight: 800,
@@ -1926,6 +1927,24 @@ export default function AdminDashboard({
               Welcome back, {currentUser.name}
             </div>
           </div>
+
+          {/* Logout — visible only on mobile */}
+          <button
+            className="mobile-logout-btn"
+            onClick={onLogout}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 10,
+              border: `1px solid ${theme.cardBorder}`,
+              background: theme.cardBackground,
+              color: theme.mutedText,
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            ← Logout
+          </button>
 
         </div>
 
@@ -3418,7 +3437,7 @@ export default function AdminDashboard({
             <div style={{ display: "grid", gap: 20 }}>
 
               {/* Stats strip */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
+              <div className="invoice-stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
                 {[
                   { label: "Total", value: filteredInvoices.length, color: "#3b82f6", icon: "🧾" },
                   { label: "Pending", value: invoiceReviewItems.length, color: "#f59e0b", icon: "⏳" },
@@ -3444,7 +3463,7 @@ export default function AdminDashboard({
 
               {/* Filter bar */}
               <div style={{ ...cardStyle(), padding: "14px 18px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
+                <div className="invoice-filter-grid" style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
                   <input
                     style={inputStyle()}
                     value={invoiceSearch}

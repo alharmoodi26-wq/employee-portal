@@ -1180,8 +1180,9 @@ export default function EmployeeDashboard({
             gap: 12,
           }}
         >
-          <div>
+          <div style={{ flex: 1 }}>
             <h1
+              className="page-header-title"
               style={{
                 fontSize: 28,
                 fontWeight: 800,
@@ -1196,6 +1197,24 @@ export default function EmployeeDashboard({
               {currentUser.department} · {currentUser.position}
             </div>
           </div>
+
+          {/* Logout — visible only on mobile */}
+          <button
+            className="mobile-logout-btn"
+            onClick={onLogout}
+            style={{
+              padding: "8px 14px",
+              borderRadius: 10,
+              border: `1px solid ${theme.cardBorder}`,
+              background: theme.cardBackground,
+              color: theme.mutedText,
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            ← Logout
+          </button>
 
           {activeTab === "works" && (
             <button style={buttonStyle(true)} onClick={() => setShowForm((prev) => !prev)}>
@@ -1939,7 +1958,7 @@ export default function EmployeeDashboard({
             <div style={{ display: "grid", gap: 20 }}>
 
               {/* Stats strip */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
+              <div className="invoice-stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
                 {[
                   { label: "Total", value: filteredInvoices.length, color: "#3b82f6", bg: theme.cardBackground, icon: "🧾" },
                   { label: "Pending", value: pendingReviewInvoices.length, color: "#f59e0b", bg: theme.cardBackground, icon: "⏳" },
@@ -1963,7 +1982,7 @@ export default function EmployeeDashboard({
 
               {/* Filter bar */}
               <div style={{ ...cardStyle(), padding: "14px 18px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
+                <div className="invoice-filter-grid" style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
                   <input
                     style={inputStyle()}
                     value={invoiceSearch}
