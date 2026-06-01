@@ -8,7 +8,8 @@ export async function GET(request: Request) {
     512,
     Math.max(16, parseInt(searchParams.get("size") ?? "192", 10))
   );
-  const fontSize = Math.round(size * 0.33);
+  const fontSize = Math.round(size * 0.28);
+  const subFontSize = Math.round(size * 0.085);
   const radius = Math.round(size * 0.22);
 
   return new ImageResponse(
@@ -17,23 +18,17 @@ export async function GET(request: Request) {
         style={{
           width: size,
           height: size,
-          background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+          background: "linear-gradient(145deg, #0f1c35 0%, #1b2a4a 100%)",
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           borderRadius: radius,
+          gap: 0,
         }}
       >
-        <span
-          style={{
-            color: "#ffffff",
-            fontSize,
-            fontWeight: 900,
-            letterSpacing: "-0.03em",
-          }}
-        >
-          EIHG
-        </span>
+        <span style={{ color: "#F0C040", fontSize, fontWeight: 900, letterSpacing: "0.04em", lineHeight: 1 }}>EIHG</span>
+        <span style={{ color: "#c9a520", fontSize: subFontSize, fontWeight: 700, letterSpacing: "0.18em", lineHeight: 1, marginTop: Math.round(size * 0.04) }}>PORTAL</span>
       </div>
     ),
     { width: size, height: size }

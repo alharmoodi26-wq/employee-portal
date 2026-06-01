@@ -38,6 +38,8 @@ import {
   formatDateTime,
   useIsMobile,
   MobileBottomNav,
+  escHtml,
+  safeUrl,
 } from "./portal-utils";
 
 type DashboardTab = "dashboard" | "review" | "employees" | "hr" | "invoices";
@@ -60,6 +62,7 @@ type OHCCertificationEntry = {
   employeePhotoLink?: string;
   certificatePhotoPath?: string;
   certificatePhotoLink?: string;
+  applied?: boolean;
 };
 
 type InvoiceStatus = "Approved" | "Pending Review" | "Paid";
@@ -90,6 +93,15 @@ type EmployeeProfileTab =
   | "attendance";
 
 type OHCStatus = "Active" | "Expiring Soon" | "Expires Today" | "Expired";
+type OHCDisplayStatus = OHCStatus | "Applied";
+
+function getOHCDisplayStatus(
+  expiryDate: string,
+  applied: boolean | undefined
+): OHCDisplayStatus {
+  const base = getOHCStatus(expiryDate);
+  return applied && base === "Expired" ? "Applied" : base;
+}
 
 type AdminDashboardProps = {
   currentUser: Employee;
@@ -147,6 +159,7 @@ type AdminDashboardProps = {
     }
   ) => Promise<void>;
   onDeleteOHCCertification?: (certificationId: string, employeeName: string) => Promise<void>;
+  onSetOHCApplied?: (certificationId: string, applied: boolean) => Promise<void>;
   onUpdateInvoice: (
     invoiceId: string,
     payload: {
@@ -200,9 +213,14 @@ function getOHCStatus(expiryDate: string): OHCStatus {
   return "Active";
 }
 
-function getOHCBadgeStyle(status: OHCStatus): React.CSSProperties {
+function getOHCBadgeStyle(status: OHCDisplayStatus): React.CSSProperties {
   const isDark = getThemeMode() === "dark";
   const base: React.CSSProperties = { borderRadius: 999, padding: "6px 10px", fontSize: 12, fontWeight: 800 };
+  if (status === "Applied") return { ...base,
+    background: isDark ? "rgba(59,130,246,0.14)" : "#dbeafe",
+    color: isDark ? "#60a5fa" : "#1e40af",
+    border: isDark ? "1px solid rgba(59,130,246,0.3)" : "1px solid #bfdbfe",
+  };
   if (status === "Expired") return { ...base,
     background: isDark ? "rgba(239,68,68,0.14)" : "#fee2e2",
     color: isDark ? "#f87171" : "#991b1b",
@@ -564,7 +582,7 @@ function OHCRenewalCard({
         }}
       >
         {visible.map((item) => {
-          const status = getOHCStatus(item.expiryDate);
+          const status = getOHCDisplayStatus(item.expiryDate, item.applied);
 
           return (
             <div
@@ -785,6 +803,7 @@ export default function AdminDashboard({
   onAddOHCCertification,
   onUpdateOHCCertification,
   onDeleteOHCCertification,
+  onSetOHCApplied,
   onUpdateInvoice,
   onApproveInvoice,
   onOpenInvoiceAttachment,
@@ -858,6 +877,7 @@ export default function AdminDashboard({
 
   const [ohcFormOpen, setOhcFormOpen] = useState(false);
   const [ohcSaving, setOhcSaving] = useState(false);
+  const [ohcApplying, setOhcApplying] = useState(false);
   const [editingOHC, setEditingOHC] = useState<OHCCertificationEntry | null>(null);
   const [ohcEmployeePhoto, setOhcEmployeePhoto] = useState<File | null>(null);
   const [ohcCertificatePhoto, setOhcCertificatePhoto] = useState<File | null>(null);
@@ -942,10 +962,13 @@ export default function AdminDashboard({
   );
 
   const sortedOHC = useMemo(() => {
-    const order: Record<OHCStatus, number> = { "Expired": 0, "Expires Today": 1, "Expiring Soon": 2, "Active": 3 };
     return [...ohcCertifications]
-      .sort((a, b) => order[getOHCStatus(a.expiryDate)] - order[getOHCStatus(b.expiryDate)])
-      .filter(item => !ohcSearch.trim() || item.name.toLowerCase().includes(ohcSearch.trim().toLowerCase()));
+      .filter(item => !ohcSearch.trim() || item.name.toLowerCase().includes(ohcSearch.trim().toLowerCase()))
+      .sort((a, b) => {
+        const ta = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
+        const tb = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
+        return ta - tb;
+      });
   }, [ohcCertifications, ohcSearch]);
 
   const bdDaysUntil = (bStr: string): number => {
@@ -1208,65 +1231,81 @@ export default function AdminDashboard({
     const paidTotal = invoicePaidItems.reduce((s, i) => s + Number(i.totalAmount || 0), 0);
     const approvedTotal = invoiceApprovedItems.reduce((s, i) => s + Number(i.totalAmount || 0), 0);
     const activeFilters = [
-      invoiceSupplierFilter ? `Supplier: ${invoiceSupplierFilter}` : "",
-      invoiceStatusFilter !== "All" ? `Status: ${invoiceStatusFilter}` : "",
-      invoiceFromDate ? `From: ${invoiceFromDate}` : "",
-      invoiceToDate ? `To: ${invoiceToDate}` : "",
-      invoiceSearch ? `Search: ${invoiceSearch}` : "",
+      invoiceSupplierFilter ? `Supplier: ${escHtml(invoiceSupplierFilter)}` : "",
+      invoiceStatusFilter !== "All" ? `Status: ${escHtml(invoiceStatusFilter)}` : "",
+      invoiceFromDate ? `From: ${escHtml(invoiceFromDate)}` : "",
+      invoiceToDate ? `To: ${escHtml(invoiceToDate)}` : "",
+      invoiceSearch ? `Search: ${escHtml(invoiceSearch)}` : "",
     ].filter(Boolean);
 
     popup.document.write(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>Admin Invoice Report</title>
+  <title>Invoice Report — EIHG</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Segoe UI',Arial,sans-serif;color:#111827;background:#f9fafb}
-    .page{max-width:1000px;margin:0 auto;padding:40px 32px}
-    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:22px;border-bottom:2px solid #e5e7eb;margin-bottom:26px}
-    .company{font-size:20px;font-weight:900;color:#1e293b}
-    .company-sub{font-size:12px;color:#6b7280;margin-top:3px}
+    .page{max-width:1060px;margin:0 auto;padding:40px 32px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:22px;border-bottom:3px solid #0f1c35;margin-bottom:26px}
+    .brand-box{display:flex;align-items:center;gap:14px}
+    .brand-icon{width:54px;height:54px;background:linear-gradient(145deg,#0f1c35,#1b2a4a);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid #F0C040;flex-shrink:0}
+    .brand-title{font-size:19px;font-weight:900;color:#0f1c35}
+    .brand-sub{font-size:11px;color:#6b7280;margin-top:2px;font-weight:500}
     .report-meta{text-align:right;font-size:12px;color:#6b7280;line-height:1.9}
     .report-meta strong{color:#374151}
     .tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:26px}
-    .tile{border-radius:10px;padding:14px 10px;text-align:center}
-    .tile-label{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
-    .tile-value{font-size:22px;font-weight:900}
-    .tile-sub{font-size:11px;margin-top:3px;opacity:.8}
-    .tile-total{background:#eff6ff;color:#1d4ed8}
-    .tile-pending{background:#fef3c7;color:#92400e}
-    .tile-approved{background:#dbeafe;color:#1d4ed8}
-    .tile-paid{background:#dcfce7;color:#166534}
-    .tile-amount{background:#f3e8ff;color:#7c3aed}
-    .filter-bar{background:#f3f4f6;border-radius:8px;padding:9px 14px;margin-bottom:22px;font-size:12px;color:#6b7280;display:flex;gap:16px;flex-wrap:wrap}
+    .tile{border-radius:12px;padding:16px 10px;text-align:center}
+    .tile-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+    .tile-value{font-size:24px;font-weight:900;line-height:1}
+    .tile-sub{font-size:11px;margin-top:4px;opacity:.85}
+    .tile-total{background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8}
+    .tile-pending{background:#fef3c7;border:1px solid #fde68a;color:#92400e}
+    .tile-approved{background:#dbeafe;border:1px solid #bfdbfe;color:#1e40af}
+    .tile-paid{background:#dcfce7;border:1px solid #bbf7d0;color:#166534}
+    .tile-amount{background:#0f1c35;border:1px solid #1b2a4a;color:#F0C040}
+    .filter-bar{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;margin-bottom:22px;font-size:12px;color:#64748b;display:flex;gap:16px;flex-wrap:wrap;align-items:center}
     .filter-bar strong{color:#374151}
-    .section-title{font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#374151;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #e5e7eb}
-    table{width:100%;border-collapse:collapse;margin-bottom:26px;font-size:13px}
-    thead tr{background:#1e293b;color:#fff}
-    thead th{padding:10px 12px;text-align:left;font-weight:700;font-size:11px;letter-spacing:.04em}
+    .section-title{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:#0f1c35;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #0f1c35;display:flex;align-items:center;gap:6px}
+    table{width:100%;border-collapse:collapse;margin-bottom:26px;font-size:13px;border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.07)}
+    thead tr{background:#0f1c35}
+    thead th{padding:11px 12px;text-align:left;font-weight:700;font-size:11px;letter-spacing:.05em;color:#F0C040}
+    thead th:last-child{text-align:right}
     tbody tr:nth-child(even){background:#f8fafc}
     tbody tr:nth-child(odd){background:#fff}
-    tbody td{padding:9px 12px;border-bottom:1px solid #e5e7eb;color:#374151}
-    .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:800}
-    .badge-paid{background:#dcfce7;color:#166534}
-    .badge-approved{background:#dbeafe;color:#1d4ed8}
-    .badge-pending{background:#fef3c7;color:#92400e}
+    tbody td{padding:9px 12px;border-bottom:1px solid #f1f5f9;color:#374151;vertical-align:middle}
+    .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:800}
+    .badge-paid{background:#dcfce7;color:#166534;border:1px solid #bbf7d0}
+    .badge-approved{background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe}
+    .badge-pending{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
     .amount-cell{font-weight:700;color:#1e293b;text-align:right}
-    .totals-row td{background:#1e293b;color:#fff;font-weight:800;padding:10px 12px}
+    .totals-row td{background:#0f1c35;color:#F0C040;font-weight:800;padding:11px 12px}
+    .totals-row td:last-child{text-align:right}
     .footer{margin-top:28px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
-    @media print{body{background:#fff}.page{padding:20px}}
+    .no-print{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:8px;padding:10px 20px;background:#fff;border-bottom:1px solid #e5e7eb;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}table{box-shadow:none}}
   </style>
 </head>
 <body>
+<div class="no-print">
+  <button onclick="window.close()" style="padding:8px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,#0f1c35,#1b2a4a);color:#F0C040;cursor:pointer;font-size:13px;font-weight:700">← Back to Portal</button>
+  <button onclick="window.print()" style="padding:8px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#1e293b;cursor:pointer;font-size:13px;font-weight:700">🖨 Print</button>
+  <span style="margin-left:4px;font-size:11px;color:#9ca3af">This bar is hidden when printing</span>
+</div>
 <div class="page">
   <div class="header">
-    <div>
-      <div class="company">Emirates International Holdings Group</div>
-      <div class="company-sub">Admin Invoice Review Report</div>
+    <div class="brand-box">
+      <div class="brand-icon">
+        <span style="color:#F0C040;font-size:13px;font-weight:900;letter-spacing:0.06em;line-height:1">EIHG</span>
+        <span style="color:#c9a520;font-size:7px;font-weight:700;letter-spacing:0.18em;line-height:1;margin-top:3px">PORTAL</span>
+      </div>
+      <div>
+        <div class="brand-title">Emirates International Holdings Group</div>
+        <div class="brand-sub">Invoice Report · Admin Review</div>
+      </div>
     </div>
     <div class="report-meta">
-      <strong>Admin:</strong> ${currentUser.name}<br/>
+      <strong>Admin:</strong> ${escHtml(currentUser.name)}<br/>
       <strong>Printed:</strong> ${new Date().toLocaleString()}<br/>
       <strong>Report ID:</strong> ADM-INV-${Date.now().toString().slice(-6)}
     </div>
@@ -1294,21 +1333,21 @@ export default function AdminDashboard({
       <div class="tile-sub">AED ${formatMoney(paidTotal)}</div>
     </div>
     <div class="tile tile-amount">
-      <div class="tile-label">Grand Total</div>
-      <div class="tile-value" style="font-size:15px">AED</div>
-      <div class="tile-sub" style="font-size:13px;font-weight:800">${formatMoney(invoiceGrandTotal)}</div>
+      <div class="tile-label" style="color:#c9a520">Grand Total</div>
+      <div class="tile-value" style="font-size:13px;margin-top:4px">AED</div>
+      <div class="tile-sub" style="font-size:14px;font-weight:900;opacity:1">${formatMoney(invoiceGrandTotal)}</div>
     </div>
   </div>
 
-  ${activeFilters.length > 0 ? `<div class="filter-bar">${activeFilters.map(f => `<span><strong>${f.split(":")[0]}:</strong> ${f.split(":").slice(1).join(":").trim()}</span>`).join("")}</div>` : ""}
+  ${activeFilters.length > 0 ? `<div class="filter-bar">🔍 <strong>Active Filters:</strong> ${activeFilters.map(f => `<span style="background:#e2e8f0;padding:2px 10px;border-radius:999px;font-weight:600">${f}</span>`).join("")}</div>` : ""}
 
-  <div class="section-title">Invoice Details</div>
+  <div class="section-title">📋 Invoice Details</div>
   <table>
     <thead>
       <tr>
-        <th>#</th>
+        <th style="width:36px">#</th>
         <th>Employee</th>
-        <th>Supplier Name</th>
+        <th>Supplier</th>
         <th>Date Received</th>
         <th>Date Approved</th>
         <th>Attachment</th>
@@ -1319,25 +1358,25 @@ export default function AdminDashboard({
     <tbody>
       ${filteredInvoices.length > 0 ? filteredInvoices.map((item, idx) => `
       <tr>
-        <td style="color:#9ca3af;font-size:12px">${idx + 1}</td>
-        <td style="font-weight:600">${item.employeeName}</td>
-        <td>${item.supplierName}</td>
-        <td>${item.dateReceived || "—"}</td>
-        <td>${item.dateApproved || "—"}</td>
-        <td style="color:#6b7280;font-size:12px">${item.attachmentName || "—"}</td>
-        <td><span class="badge badge-${item.status === "Paid" ? "paid" : item.status === "Approved" ? "approved" : "pending"}">${item.status}</span></td>
+        <td style="color:#9ca3af;font-size:12px;text-align:center">${idx + 1}</td>
+        <td style="font-weight:700;color:#1e293b">${escHtml(item.employeeName)}</td>
+        <td style="color:#374151">${escHtml(item.supplierName)}</td>
+        <td style="color:#6b7280;font-size:12px">${escHtml(item.dateReceived || "—")}</td>
+        <td style="color:#6b7280;font-size:12px">${escHtml(item.dateApproved || "—")}</td>
+        <td style="color:#9ca3af;font-size:11px">${escHtml(item.attachmentName || "—")}</td>
+        <td><span class="badge badge-${item.status === "Paid" ? "paid" : item.status === "Approved" ? "approved" : "pending"}">${escHtml(item.status)}</span></td>
         <td class="amount-cell">${formatMoney(item.totalAmount)}</td>
-      </tr>`).join("") : `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:20px">No invoices found</td></tr>`}
+      </tr>`).join("") : `<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:24px;font-style:italic">No invoices match the current filters</td></tr>`}
       <tr class="totals-row">
-        <td colspan="7" style="text-align:right">Grand Total</td>
-        <td style="text-align:right">AED ${formatMoney(invoiceGrandTotal)}</td>
+        <td colspan="7" style="text-align:right;letter-spacing:0.04em">GRAND TOTAL</td>
+        <td>AED ${formatMoney(invoiceGrandTotal)}</td>
       </tr>
     </tbody>
   </table>
 
   <div class="footer">
-    <span>Emirates International Holdings Group — Confidential · Admin Report</span>
-    <span>Generated by Employee Portal · ${new Date().toLocaleDateString()}</span>
+    <span>Emirates International Holdings Group — Confidential · Finance Department</span>
+    <span>Generated: ${new Date().toLocaleString()}</span>
   </div>
 </div>
 </body>
@@ -1346,6 +1385,338 @@ export default function AdminDashboard({
     popup.document.close();
     popup.focus();
     popup.print();
+  };
+
+  const handlePrintOHCReport = () => {
+    const popup = window.open("", "_blank", "width=1200,height=900");
+    if (!popup) return;
+
+    const sorted = [...ohcCertifications].sort((a, b) => {
+      const ta = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
+      const tb = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
+      return ta - tb;
+    });
+
+    const total         = sorted.length;
+    const activeCount   = sorted.filter(i => getOHCDisplayStatus(i.expiryDate, i.applied) === "Active").length;
+    const soonCount     = sorted.filter(i => { const s = getOHCDisplayStatus(i.expiryDate, i.applied); return s === "Expiring Soon" || s === "Expires Today"; }).length;
+    const expiredCount  = sorted.filter(i => getOHCDisplayStatus(i.expiryDate, i.applied) === "Expired").length;
+    const appliedCount  = sorted.filter(i => getOHCDisplayStatus(i.expiryDate, i.applied) === "Applied").length;
+
+    const statusColor = (s: OHCDisplayStatus) =>
+      s === "Applied" ? "#1e40af" : s === "Expired" ? "#dc2626" : s === "Expires Today" ? "#ea580c" : s === "Expiring Soon" ? "#d97706" : "#16a34a";
+    const statusBg = (s: OHCDisplayStatus) =>
+      s === "Applied" ? "#dbeafe" : s === "Expired" ? "#fef2f2" : s === "Expires Today" ? "#fff7ed" : s === "Expiring Soon" ? "#fffbeb" : "#f0fdf4";
+
+    const rows = sorted.map((item, idx) => {
+      const status   = getOHCDisplayStatus(item.expiryDate, item.applied);
+      const hint     = status === "Applied" ? "Renewal in progress" : getOHCHint(item.expiryDate);
+      const sc       = statusColor(status);
+      const sb       = statusBg(status);
+      const empPhotoUrl = safeUrl(item.employeePhotoLink);
+      const certPhotoUrl = safeUrl(item.certificatePhotoLink);
+      const photo    = empPhotoUrl
+        ? `<img src="${empPhotoUrl}" width="44" height="44" style="width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid ${sc}40;display:block;margin:0 auto" onerror="this.outerHTML='<div style=width:44px;height:44px;border-radius:50%;background:#e5e7eb;display:flex;align-items:center;justify-content:center;font-size:18px;margin:0 auto>👤</div>'" />`
+        : `<div style="width:44px;height:44px;border-radius:50%;background:#e5e7eb;display:flex;align-items:center;justify-content:center;font-size:18px;margin:0 auto">👤</div>`;
+      const cert     = certPhotoUrl
+        ? `<img src="${certPhotoUrl}" style="width:56px;height:38px;border-radius:6px;object-fit:cover;border:1px solid #e5e7eb;display:block;margin:0 auto" onerror="this.outerHTML='<span style=color:#d1d5db;font-size:11px>—</span>'" />`
+        : `<span style="color:#d1d5db;font-size:11px">—</span>`;
+      const rowBg    = idx % 2 === 0 ? "#ffffff" : "#f8fafc";
+      return `<tr style="background:${rowBg}">
+        <td style="text-align:center;color:#9ca3af;font-size:11px;padding:8px 6px">${idx + 1}</td>
+        <td style="padding:8px 10px;text-align:center">${photo}</td>
+        <td style="padding:8px 12px;font-weight:700;font-size:13px;color:#1e293b">${escHtml(item.name)}</td>
+        <td style="padding:8px 12px;font-size:13px;font-weight:600;color:#374151;white-space:nowrap">${escHtml(item.expiryDate || "—")}</td>
+        <td style="padding:8px 12px;font-size:12px;color:#6b7280">${escHtml(hint)}</td>
+        <td style="padding:8px 12px;text-align:center">
+          <span style="display:inline-block;padding:3px 11px;border-radius:999px;font-size:11px;font-weight:800;color:${sc};background:${sb};border:1px solid ${sc}30">${escHtml(status)}</span>
+        </td>
+        <td style="padding:8px 10px;text-align:center">${cert}</td>
+      </tr>`;
+    }).join("");
+
+    popup.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>OHC Certifications Report — EIHG</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#111827;background:#f9fafb}
+    .page{max-width:1060px;margin:0 auto;padding:40px 32px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:22px;border-bottom:3px solid #0f1c35;margin-bottom:24px}
+    .brand-box{display:flex;align-items:center;gap:14px}
+    .brand-icon{width:52px;height:52px;background:linear-gradient(145deg,#0f1c35,#1b2a4a);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid #F0C040;flex-shrink:0}
+    .brand-title{font-size:19px;font-weight:900;color:#0f1c35;letter-spacing:-0.01em}
+    .brand-sub{font-size:11px;color:#6b7280;margin-top:2px;font-weight:500}
+    .report-meta{text-align:right;font-size:12px;color:#6b7280;line-height:1.9}
+    .report-meta strong{color:#374151}
+    .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:26px}
+    .tile{border-radius:12px;padding:16px 12px;text-align:center}
+    .tile-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+    .tile-value{font-size:28px;font-weight:900;line-height:1}
+    table{width:100%;border-collapse:collapse;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border-radius:10px;overflow:hidden}
+    thead tr{background:#0f1c35}
+    thead th{padding:11px 12px;text-align:left;font-weight:700;font-size:11px;letter-spacing:.05em;color:#F0C040}
+    thead th:first-child{text-align:center}
+    tbody td{border-bottom:1px solid #e5e7eb;vertical-align:middle}
+    .footer{margin-top:30px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
+    .no-print{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:8px;padding:10px 20px;background:#fff;border-bottom:1px solid #e5e7eb;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}table{box-shadow:none}}
+  </style>
+</head>
+<body>
+<div class="no-print">
+  <button onclick="window.close()" style="padding:8px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,#0f1c35,#1b2a4a);color:#F0C040;cursor:pointer;font-size:13px;font-weight:700">← Back to Portal</button>
+  <button onclick="window.print()" style="padding:8px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#1e293b;cursor:pointer;font-size:13px;font-weight:700">🖨 Print</button>
+  <span style="margin-left:4px;font-size:11px;color:#9ca3af">Wait for photos to load before printing</span>
+</div>
+<div class="page">
+  <div class="header">
+    <div class="brand-box">
+      <div class="brand-icon">
+        <span style="color:#F0C040;font-size:13px;font-weight:900;letter-spacing:0.06em;line-height:1">EIHG</span>
+        <span style="color:#c9a520;font-size:7px;font-weight:700;letter-spacing:0.18em;line-height:1;margin-top:3px">PORTAL</span>
+      </div>
+      <div>
+        <div class="brand-title">Emirates International Holdings Group</div>
+        <div class="brand-sub">OHC Certifications — Full Report · Sorted by Expiry Date</div>
+      </div>
+    </div>
+    <div class="report-meta">
+      <strong>Printed by:</strong> ${escHtml(currentUser.name)}<br/>
+      <strong>Date:</strong> ${new Date().toLocaleString()}<br/>
+      <strong>Total Records:</strong> ${total}
+    </div>
+  </div>
+
+  <div class="tiles" style="${appliedCount > 0 ? "grid-template-columns:repeat(5,1fr)" : ""}">
+    <div class="tile" style="background:#f0fdf4;border:1px solid #bbf7d0">
+      <div class="tile-label" style="color:#166534">Active</div>
+      <div class="tile-value" style="color:#16a34a">${activeCount}</div>
+    </div>
+    <div class="tile" style="background:#fffbeb;border:1px solid #fde68a">
+      <div class="tile-label" style="color:#92400e">Expiring Soon</div>
+      <div class="tile-value" style="color:#d97706">${soonCount}</div>
+    </div>
+    <div class="tile" style="background:#fef2f2;border:1px solid #fecaca">
+      <div class="tile-label" style="color:#991b1b">Expired</div>
+      <div class="tile-value" style="color:#dc2626">${expiredCount}</div>
+    </div>
+    ${appliedCount > 0 ? `<div class="tile" style="background:#dbeafe;border:1px solid #bfdbfe">
+      <div class="tile-label" style="color:#1e40af">Applied</div>
+      <div class="tile-value" style="color:#1d4ed8">${appliedCount}</div>
+    </div>` : ""}
+    <div class="tile" style="background:#eff6ff;border:1px solid #bfdbfe">
+      <div class="tile-label" style="color:#1e40af">Total</div>
+      <div class="tile-value" style="color:#2563eb">${total}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:36px;text-align:center">#</th>
+        <th style="width:60px;text-align:center">Photo</th>
+        <th>Employee Name</th>
+        <th style="width:115px">Expiry Date</th>
+        <th style="width:130px">Remaining</th>
+        <th style="width:120px;text-align:center">Status</th>
+        <th style="width:72px;text-align:center">Certificate</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <span>Emirates International Holdings Group — Confidential Document</span>
+    <span>Generated: ${new Date().toLocaleString()}</span>
+  </div>
+</div>
+</body>
+</html>`);
+    popup.document.close();
+    setTimeout(() => popup.focus(), 100);
+  };
+
+  const handlePrintBirthdayReport = () => {
+    const popup = window.open("", "_blank", "width=1200,height=900");
+    if (!popup) return;
+
+    const today = new Date();
+    const todayMonth = today.getMonth();
+    const todayDate  = today.getDate();
+
+    const calcDaysUntil = (bStr: string): number => {
+      if (!bStr) return 999;
+      const bday = new Date(bStr);
+      if (isNaN(bday.getTime())) return 999;
+      const thisYear = new Date(today.getFullYear(), bday.getMonth(), bday.getDate());
+      const diff = Math.round((thisYear.getTime() - today.getTime()) / 86400000);
+      return diff >= 0 ? diff : Math.round((new Date(today.getFullYear() + 1, bday.getMonth(), bday.getDate()).getTime() - today.getTime()) / 86400000);
+    };
+
+    const calcAge = (bStr: string): string => {
+      if (!bStr) return "—";
+      const bday = new Date(bStr);
+      if (isNaN(bday.getTime())) return "—";
+      let age = today.getFullYear() - bday.getFullYear();
+      if (today.getMonth() < bday.getMonth() || (today.getMonth() === bday.getMonth() && today.getDate() < bday.getDate())) age--;
+      return String(age);
+    };
+
+    const formatBirthday = (bStr: string): string => {
+      if (!bStr) return "—";
+      const bday = new Date(bStr);
+      if (isNaN(bday.getTime())) return bStr;
+      return bday.toLocaleDateString("en-GB", { day: "2-digit", month: "long" });
+    };
+
+    const sorted = [...birthdays].sort((a, b) => calcDaysUntil(a.birthday) - calcDaysUntil(b.birthday));
+    const todayCount    = sorted.filter(b => { const d = new Date(b.birthday); return !isNaN(d.getTime()) && d.getMonth() === todayMonth && d.getDate() === todayDate; }).length;
+    const nextSevenDays = sorted.filter(b => calcDaysUntil(b.birthday) <= 7).length;
+    const monthNames    = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const nextUpcoming  = sorted.find(b => { const d = new Date(b.birthday); return !isNaN(d.getTime()); });
+    const tileMonth     = nextUpcoming ? new Date(nextUpcoming.birthday).getMonth() : todayMonth;
+    const tileMonthName = monthNames[tileMonth];
+    const thisMonthCount = sorted.filter(b => { const d = new Date(b.birthday); return !isNaN(d.getTime()) && d.getMonth() === tileMonth; }).length;
+
+    const rows = sorted.map((item, idx) => {
+      const days     = calcDaysUntil(item.birthday);
+      const age      = calcAge(item.birthday);
+      const isToday  = days === 0;
+      const isSoon   = days > 0 && days <= 7;
+      const pillColor = isToday ? "#db2777" : isSoon ? "#d97706" : "#6366f1";
+      const pillBg    = isToday ? "#fdf2f8" : isSoon ? "#fffbeb" : "#f5f3ff";
+      const pillText  = isToday ? "🎂 Today!" : `in ${days}d`;
+      const photoUrl  = safeUrl(item.photoLink);
+      const photo     = photoUrl
+        ? `<img src="${photoUrl}" style="width:46px;height:46px;border-radius:50%;object-fit:cover;border:2px solid ${pillColor}40;display:block;margin:0 auto" onerror="this.outerHTML='<div style=width:46px;height:46px;border-radius:50%;background:#e5e7eb;display:flex;align-items:center;justify-content:center;font-size:20px;margin:0 auto>🎂</div>'" />`
+        : `<div style="width:46px;height:46px;border-radius:50%;background:#f3f4f6;display:flex;align-items:center;justify-content:center;font-size:20px;margin:0 auto">🎂</div>`;
+      const rowBg = isToday ? "#fff0f8" : idx % 2 === 0 ? "#ffffff" : "#f9fafb";
+      const border = isToday ? "border-left:3px solid #db2777" : isSoon ? "border-left:3px solid #f59e0b" : "";
+      return `<tr style="background:${rowBg};${border}">
+        <td style="padding:8px 10px;text-align:center;color:#9ca3af;font-size:11px">${idx + 1}</td>
+        <td style="padding:8px 10px;text-align:center">${photo}</td>
+        <td style="padding:8px 14px;font-weight:700;font-size:13px;color:#1e293b">${escHtml(item.name)}</td>
+        <td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600">${escHtml(formatBirthday(item.birthday))}</td>
+        <td style="padding:8px 12px;font-size:13px;color:#6b7280;text-align:center">${escHtml(age)} yrs</td>
+        <td style="padding:8px 12px;text-align:center">
+          <span style="display:inline-block;padding:3px 12px;border-radius:999px;font-size:11px;font-weight:800;color:${pillColor};background:${pillBg};border:1px solid ${pillColor}30">${escHtml(pillText)}</span>
+        </td>
+      </tr>`;
+    }).join("");
+
+    popup.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Staff Birthdays Report — EIHG</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#111827;background:#f9fafb}
+    .page{max-width:1000px;margin:0 auto;padding:40px 32px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:22px;border-bottom:3px solid #0f1c35;margin-bottom:26px}
+    .brand-box{display:flex;align-items:center;gap:14px}
+    .brand-icon{width:54px;height:54px;background:linear-gradient(145deg,#0f1c35,#1b2a4a);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid #F0C040;flex-shrink:0}
+    .brand-title{font-size:19px;font-weight:900;color:#0f1c35}
+    .brand-sub{font-size:11px;color:#6b7280;margin-top:2px;font-weight:500}
+    .report-meta{text-align:right;font-size:12px;color:#6b7280;line-height:1.9}
+    .report-meta strong{color:#374151}
+    .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:26px}
+    .tile{border-radius:12px;padding:16px 14px;text-align:center}
+    .tile-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+    .tile-value{font-size:28px;font-weight:900;line-height:1}
+    .legend{display:flex;gap:20px;margin-bottom:18px;font-size:12px;color:#6b7280;flex-wrap:wrap}
+    .legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}
+    table{width:100%;border-collapse:collapse;font-size:13px;border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.07)}
+    thead tr{background:#0f1c35}
+    thead th{padding:11px 12px;text-align:left;font-weight:700;font-size:11px;letter-spacing:.05em;color:#F0C040}
+    thead th:first-child,thead th:last-child{text-align:center}
+    tbody td{border-bottom:1px solid #f1f5f9;vertical-align:middle}
+    .footer{margin-top:30px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
+    .no-print{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:8px;padding:10px 20px;background:#fff;border-bottom:1px solid #e5e7eb;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}table{box-shadow:none}}
+  </style>
+</head>
+<body>
+<div class="no-print">
+  <button onclick="window.close()" style="padding:8px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,#0f1c35,#1b2a4a);color:#F0C040;cursor:pointer;font-size:13px;font-weight:700">← Back to Portal</button>
+  <button onclick="window.print()" style="padding:8px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#1e293b;cursor:pointer;font-size:13px;font-weight:700">🖨 Print</button>
+  <span style="margin-left:4px;font-size:11px;color:#9ca3af">Wait for photos to load before printing</span>
+</div>
+<div class="page">
+
+  <div class="header">
+    <div class="brand-box">
+      <div class="brand-icon">
+        <span style="color:#F0C040;font-size:14px;font-weight:900;letter-spacing:0.06em;line-height:1">EIHG</span>
+        <span style="color:#c9a520;font-size:8px;font-weight:700;letter-spacing:0.18em;margin-top:3px">PORTAL</span>
+      </div>
+      <div>
+        <div class="brand-title">Emirates International Holdings Group</div>
+        <div class="brand-sub">Staff Birthdays — Full Report · Sorted by Upcoming Birthday</div>
+      </div>
+    </div>
+    <div class="report-meta">
+      <strong>Printed by:</strong> ${escHtml(currentUser.name)}<br/>
+      <strong>Date:</strong> ${today.toLocaleDateString("en-GB", { day: "2-digit", month: "long", year: "numeric" })}<br/>
+      <strong>Total Staff:</strong> ${sorted.length}
+    </div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile" style="background:#f5f3ff;border:1px solid #ddd6fe">
+      <div class="tile-label" style="color:#6d28d9">Total Staff</div>
+      <div class="tile-value" style="color:#7c3aed">${sorted.length}</div>
+    </div>
+    <div class="tile" style="background:#fdf2f8;border:1px solid #fbcfe8">
+      <div class="tile-label" style="color:#9d174d">Today 🎂</div>
+      <div class="tile-value" style="color:#db2777">${todayCount}</div>
+    </div>
+    <div class="tile" style="background:#fffbeb;border:1px solid #fde68a">
+      <div class="tile-label" style="color:#92400e">Next 7 Days</div>
+      <div class="tile-value" style="color:#d97706">${nextSevenDays}</div>
+    </div>
+    <div class="tile" style="background:#eff6ff;border:1px solid #bfdbfe">
+      <div class="tile-label" style="color:#1e40af">${tileMonthName}</div>
+      <div class="tile-value" style="color:#2563eb">${thisMonthCount}</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><span class="legend-dot" style="background:#db2777"></span>Today's birthday</span>
+    <span><span class="legend-dot" style="background:#f59e0b"></span>Within 7 days</span>
+    <span><span class="legend-dot" style="background:#6366f1"></span>Upcoming</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:36px;text-align:center">#</th>
+        <th style="width:60px;text-align:center">Photo</th>
+        <th>Employee Name</th>
+        <th style="width:130px">Birthday</th>
+        <th style="width:80px;text-align:center">Age</th>
+        <th style="width:110px;text-align:center">Countdown</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <span>Emirates International Holdings Group — Confidential Document</span>
+    <span>Generated: ${today.toLocaleString()}</span>
+  </div>
+</div>
+</body>
+</html>`);
+    popup.document.close();
+    setTimeout(() => popup.focus(), 100);
   };
 
   const openAddOHCForm = () => {
@@ -1958,7 +2329,7 @@ export default function AdminDashboard({
 
 
         {activeTab === "dashboard" && (
-          <div style={tabScrollAreaStyle}>
+          <div className="tab-scroll-area" style={tabScrollAreaStyle}>
             <div style={{ display: "grid", gap: 20 }}>
 
               {/* ── Stats strip ── */}
@@ -2055,7 +2426,7 @@ export default function AdminDashboard({
               )}
 
               {/* ── 2-column: Submitted Tasks + Pending Works ── */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              <div className="two-col-split" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
 
                 {/* Submitted Tasks */}
                 <div style={{
@@ -2192,7 +2563,7 @@ export default function AdminDashboard({
         )}
 
         {activeTab === "review" && (
-          <div style={tabScrollAreaStyle}>
+          <div className="tab-scroll-area" style={tabScrollAreaStyle}>
             <div style={{ display: "grid", gap: 20 }}>
 
               {/* Tab switcher as stat tiles */}
@@ -2597,7 +2968,7 @@ export default function AdminDashboard({
         )}
 
         {activeTab === "employees" && !selectedEmployee && (
-          <div style={tabScrollAreaStyle}>
+          <div className="tab-scroll-area" style={tabScrollAreaStyle}>
             <div style={{ display: "grid", gap: 16 }}>
 
               {/* Stats strip */}
@@ -2686,7 +3057,7 @@ export default function AdminDashboard({
         )}
 
         {activeTab === "employees" && selectedEmployee && (
-          <div style={tabScrollAreaStyle}>
+          <div className="tab-scroll-area" style={tabScrollAreaStyle}>
             <div style={{ display: "grid", gap: 16 }}>
 
               {/* Profile header card */}
@@ -2724,11 +3095,15 @@ export default function AdminDashboard({
                         ))}
                       </div>
                     </div>
-                    <div className="emp-profile-actions" style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
+                    <div className="emp-profile-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button style={buttonStyle(false)} onClick={() => { setSelectedEmployee(null); setEmployeeProfileTab("overview"); setEmployeeSearch(""); }}>← Back</button>
                       <button style={buttonStyle(true)} onClick={() => setEmployeeProfileTab("assign")}>+ Assign Task</button>
                       {selectedEmployeeReport && (
-                        <button style={buttonStyle(false)} onClick={() => downloadEmployeeReportAsPrintPage(selectedEmployee, selectedEmployeeReport, reportRange)}>🖨 Print Report</button>
+                        <button style={buttonStyle(false)} onClick={() => {
+                          const empWords = selectedEmployee.name.toLowerCase().split(" ");
+                          const matched = birthdays.find(b => { const bw = b.name.toLowerCase().split(" "); return empWords.filter(w => bw.includes(w)).length >= 2; });
+                          downloadEmployeeReportAsPrintPage(selectedEmployee, selectedEmployeeReport, reportRange, matched?.photoLink || undefined);
+                        }}>🖨 Print Report</button>
                       )}
                     </div>
                   </div>
@@ -2792,7 +3167,7 @@ export default function AdminDashboard({
                   {/* Report date range */}
                   <div style={{ ...cardStyle(), padding: "18px 22px" }}>
                     <div style={{ fontSize: 13, fontWeight: 800, color: theme.subtleText, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 14 }}>Report Date Range</div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+                    <div className="form-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
                       <div>
                         <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>From</label>
                         <input type="date" style={inputStyle()} value={reportRange.from} onChange={(e) => setReportRange((prev) => ({ ...prev, from: e.target.value }))} />
@@ -2809,7 +3184,11 @@ export default function AdminDashboard({
                     )}
                     {selectedEmployeeReport && (
                       <div style={{ marginTop: 12 }}>
-                        <button style={buttonStyle(true)} onClick={() => downloadEmployeeReportAsPrintPage(selectedEmployee, selectedEmployeeReport, reportRange)}>
+                        <button style={buttonStyle(true)} onClick={() => {
+                          const empWords = selectedEmployee.name.toLowerCase().split(" ");
+                          const matched = birthdays.find(b => { const bw = b.name.toLowerCase().split(" "); return empWords.filter(w => bw.includes(w)).length >= 2; });
+                          downloadEmployeeReportAsPrintPage(selectedEmployee, selectedEmployeeReport, reportRange, matched?.photoLink || undefined);
+                        }}>
                           🖨 Print HR Report
                         </button>
                       </div>
@@ -2822,7 +3201,7 @@ export default function AdminDashboard({
               {employeeProfileTab === "assign" && (
                 <div style={{ ...cardStyle(), padding: "20px 24px" }}>
                   <div style={{ fontSize: 13, fontWeight: 800, color: theme.subtleText, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 16 }}>Assign New Task to {selectedEmployee.name}</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                  <div className="form-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                     <div>
                       <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Task Title</label>
                       <input style={inputStyle()} value={assignForm.title} onChange={(e) => setAssignForm({ ...assignForm, title: e.target.value })} placeholder="Enter task title" />
@@ -2903,7 +3282,7 @@ export default function AdminDashboard({
                   <div style={{ display: "grid", gap: 14 }}>
 
                     {/* Stats strip */}
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                    <div className="stat-grid-3col" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
                       {[
                         { label: "Approved Tasks", value: selectedEmployeeApprovedTasks.length, color: "#22c55e", icon: "✅" },
                         { label: "Approved Works", value: selectedEmployeeApprovedWorks.length, color: "#10b981", icon: "🏆" },
@@ -3013,7 +3392,7 @@ export default function AdminDashboard({
                   <div style={{ display: "grid", gap: 16 }}>
 
                     {/* Stats strip */}
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+                    <div className="emp-att-stats" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
                       {[
                         { label: "Total Records", value: selectedEmployeeReviewedAttendance.length, color: "#6366f1", icon: "📋" },
                         { label: "Present",        value: presentRecs.length,                       color: "#22c55e", icon: "✅" },
@@ -3066,122 +3445,154 @@ export default function AdminDashboard({
                       })}
                     </div>
 
-                    {/* Attendance table */}
-                    <div style={{
-                      background: theme.cardBackground,
-                      border: `1px solid ${theme.cardBorder}`,
-                      borderRadius: 12,
-                      overflow: "hidden",
-                      boxShadow: theme.cardShadow,
-                    }}>
-                      {/* Table header */}
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: "1fr 1fr 1fr 100px 140px 44px",
-                        gap: 0,
-                        padding: "10px 16px",
-                        background: theme.softCardBackground,
-                        borderBottom: `1px solid ${theme.cardBorder}`,
-                      }}>
-                        {["Date", "Check In", "Check Out", "Status", "Change Status", ""].map(h => (
-                          <div key={h} style={{ fontSize: 11, fontWeight: 700, color: theme.subtleText, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</div>
-                        ))}
+                    {/* Attendance display: cards on mobile, table on desktop */}
+                    {isMobile ? (
+                      /* ── Mobile: one card per record ── */
+                      <div style={{ display: "grid", gap: 10 }}>
+                        {filtered.length > 0 ? filtered.map((record) => {
+                          const isPending = record.status === "Pending";
+                          const isPresent = record.status === "Present";
+                          const statusColor = isPresent ? "#22c55e" : isPending ? "#f59e0b" : "#ef4444";
+                          return (
+                            <div key={record.id} style={{
+                              background: theme.cardBackground,
+                              border: `1px solid ${theme.cardBorder}`,
+                              borderLeft: `4px solid ${statusColor}`,
+                              borderRadius: 12,
+                              padding: "14px 16px",
+                              display: "grid",
+                              gap: 12,
+                              boxShadow: theme.cardShadow,
+                            }}>
+                              {/* Date + status badge */}
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                                <div style={{ fontWeight: 800, fontSize: 15, color: theme.title }}>{record.date}</div>
+                                <span style={{
+                                  padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700,
+                                  background: `${statusColor}18`, color: statusColor, border: `1px solid ${statusColor}40`,
+                                  flexShrink: 0,
+                                }}>{record.status}</span>
+                              </div>
+                              {/* Check In / Check Out */}
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                                <div style={{ background: theme.softCardBackground, borderRadius: 10, padding: "10px 12px", border: `1px solid ${theme.cardBorder}` }}>
+                                  <div style={{ fontSize: 10, color: theme.subtleText, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em", marginBottom: 4 }}>Check In</div>
+                                  <div style={{ fontSize: 13, color: theme.mutedText, fontWeight: 600 }}>{record.checkIn ? formatDateTime(record.checkIn) : "—"}</div>
+                                </div>
+                                <div style={{ background: theme.softCardBackground, borderRadius: 10, padding: "10px 12px", border: `1px solid ${theme.cardBorder}` }}>
+                                  <div style={{ fontSize: 10, color: theme.subtleText, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em", marginBottom: 4 }}>Check Out</div>
+                                  <div style={{ fontSize: 13, color: theme.mutedText, fontWeight: 600 }}>{record.checkOut ? formatDateTime(record.checkOut) : "—"}</div>
+                                </div>
+                              </div>
+                              {/* Change Status + Delete */}
+                              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                                <select
+                                  value={record.status}
+                                  onChange={(e) => onUpdateAttendanceStatus(record.id, e.target.value as AttendanceStatus)}
+                                  style={{
+                                    flex: 1, padding: "9px 10px", borderRadius: 10,
+                                    border: `1px solid ${theme.cardBorder}`,
+                                    background: theme.softCardBackground,
+                                    color: theme.mutedText, fontSize: 16, cursor: "pointer", outline: "none",
+                                  }}
+                                >
+                                  <option value="Pending">Pending</option>
+                                  <option value="Present">Present</option>
+                                  <option value="Absent">Absent</option>
+                                </select>
+                                <button
+                                  onClick={() => onDeleteAttendance(record)}
+                                  title="Delete"
+                                  style={{
+                                    width: 42, height: 42, borderRadius: 10, flexShrink: 0,
+                                    border: `1px solid ${theme.cardBorder}`,
+                                    background: theme.softCardBackground,
+                                    color: "#ef4444", cursor: "pointer", fontSize: 16,
+                                    display: "flex", alignItems: "center", justifyContent: "center",
+                                  }}
+                                >🗑</button>
+                              </div>
+                            </div>
+                          );
+                        }) : (
+                          <div style={{ padding: "36px 20px", textAlign: "center" }}>
+                            <div style={{ fontSize: 32, marginBottom: 10 }}>🕐</div>
+                            <div style={{ fontWeight: 700, fontSize: 15, color: theme.mutedText, marginBottom: 6 }}>
+                              {empAttFilter === "All" ? "No Attendance Records" : `No ${empAttFilter} Records`}
+                            </div>
+                            <div style={{ fontSize: 13, color: theme.subtleText }}>
+                              {empAttFilter === "All" ? "Reviewed attendance records will appear here." : `No ${empAttFilter.toLowerCase()} records found.`}
+                            </div>
+                          </div>
+                        )}
                       </div>
-
-                      {/* Rows */}
-                      {filtered.length > 0 ? filtered.map((record, idx) => {
-                        const isPresent = record.status === "Present";
-                        const rowBg = idx % 2 === 0 ? theme.cardBackground : theme.softCardBackground;
-                        return (
-                          <div key={record.id} style={{
-                            display: "grid",
-                            gridTemplateColumns: "1fr 1fr 1fr 100px 140px 44px",
-                            gap: 0,
-                            padding: "11px 16px",
-                            background: rowBg,
-                            borderBottom: `1px solid ${theme.cardBorder}`,
-                            alignItems: "center",
-                            transition: "background 0.1s",
-                          }}>
-                            {/* Date */}
-                            <div style={{ fontWeight: 700, fontSize: 13, color: theme.title }}>{record.date}</div>
-
-                            {/* Check In */}
-                            <div style={{ fontSize: 13, color: theme.mutedText }}>
-                              {record.checkIn ? formatDateTime(record.checkIn) : <span style={{ color: theme.subtleText }}>—</span>}
-                            </div>
-
-                            {/* Check Out */}
-                            <div style={{ fontSize: 13, color: theme.mutedText }}>
-                              {record.checkOut ? formatDateTime(record.checkOut) : <span style={{ color: theme.subtleText }}>—</span>}
-                            </div>
-
-                            {/* Status badge */}
-                            <div>
-                              <span style={{
-                                display: "inline-block",
-                                padding: "3px 10px",
-                                borderRadius: 999,
-                                fontSize: 11,
-                                fontWeight: 700,
-                                background: isPresent ? "rgba(34,197,94,0.14)" : "rgba(239,68,68,0.14)",
-                                color: isPresent ? "#22c55e" : "#ef4444",
-                                border: `1px solid ${isPresent ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
-                              }}>
-                                {record.status}
-                              </span>
-                            </div>
-
-                            {/* Status select */}
-                            <select
-                              value={record.status}
-                              onChange={(e) => onUpdateAttendanceStatus(record.id, e.target.value as AttendanceStatus)}
-                              style={{
-                                padding: "4px 8px",
-                                borderRadius: 8,
-                                border: `1px solid ${theme.cardBorder}`,
-                                background: theme.softCardBackground,
-                                color: theme.mutedText,
-                                fontSize: 12,
-                                cursor: "pointer",
-                                outline: "none",
-                              }}
-                            >
-                              <option value="Pending">Pending</option>
-                              <option value="Present">Present</option>
-                              <option value="Absent">Absent</option>
-                            </select>
-
-                            {/* Delete */}
-                            <button
-                              onClick={() => onDeleteAttendance(record)}
-                              title="Delete record"
-                              style={{
-                                width: 32, height: 32, borderRadius: 8,
-                                border: `1px solid ${theme.cardBorder}`,
-                                background: theme.softCardBackground,
-                                color: "#ef4444", cursor: "pointer",
-                                fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
-                              }}
-                            >
-                              🗑
-                            </button>
-                          </div>
-                        );
-                      }) : (
-                        <div style={{ padding: "36px 20px", textAlign: "center" }}>
-                          <div style={{ fontSize: 32, marginBottom: 10 }}>🕐</div>
-                          <div style={{ fontWeight: 700, fontSize: 15, color: theme.mutedText, marginBottom: 6 }}>
-                            {empAttFilter === "All" ? "No Attendance Records" : `No ${empAttFilter} Records`}
-                          </div>
-                          <div style={{ fontSize: 13, color: theme.subtleText }}>
-                            {empAttFilter === "All"
-                              ? "Reviewed attendance records will appear here."
-                              : `No ${empAttFilter.toLowerCase()} records found for this employee.`}
-                          </div>
+                    ) : (
+                      /* ── Desktop: table layout ── */
+                      <div style={{
+                        background: theme.cardBackground,
+                        border: `1px solid ${theme.cardBorder}`,
+                        borderRadius: 12,
+                        overflow: "hidden",
+                        boxShadow: theme.cardShadow,
+                      }}>
+                        <div style={{
+                          display: "grid", gridTemplateColumns: "1fr 1fr 1fr 100px 140px 44px",
+                          gap: 0, padding: "10px 16px",
+                          background: theme.softCardBackground, borderBottom: `1px solid ${theme.cardBorder}`,
+                        }}>
+                          {["Date", "Check In", "Check Out", "Status", "Change Status", ""].map(h => (
+                            <div key={h} style={{ fontSize: 11, fontWeight: 700, color: theme.subtleText, textTransform: "uppercase", letterSpacing: "0.06em" }}>{h}</div>
+                          ))}
                         </div>
-                      )}
-                    </div>
+                        {filtered.length > 0 ? filtered.map((record, idx) => {
+                          const isPresent = record.status === "Present";
+                          const rowBg = idx % 2 === 0 ? theme.cardBackground : theme.softCardBackground;
+                          return (
+                            <div key={record.id} style={{
+                              display: "grid", gridTemplateColumns: "1fr 1fr 1fr 100px 140px 44px",
+                              gap: 0, padding: "11px 16px", background: rowBg,
+                              borderBottom: `1px solid ${theme.cardBorder}`, alignItems: "center",
+                            }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: theme.title }}>{record.date}</div>
+                              <div style={{ fontSize: 13, color: theme.mutedText }}>{record.checkIn ? formatDateTime(record.checkIn) : <span style={{ color: theme.subtleText }}>—</span>}</div>
+                              <div style={{ fontSize: 13, color: theme.mutedText }}>{record.checkOut ? formatDateTime(record.checkOut) : <span style={{ color: theme.subtleText }}>—</span>}</div>
+                              <div>
+                                <span style={{
+                                  display: "inline-block", padding: "3px 10px", borderRadius: 999,
+                                  fontSize: 11, fontWeight: 700,
+                                  background: isPresent ? "rgba(34,197,94,0.14)" : "rgba(239,68,68,0.14)",
+                                  color: isPresent ? "#22c55e" : "#ef4444",
+                                  border: `1px solid ${isPresent ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                                }}>{record.status}</span>
+                              </div>
+                              <select
+                                value={record.status}
+                                onChange={(e) => onUpdateAttendanceStatus(record.id, e.target.value as AttendanceStatus)}
+                                style={{ padding: "4px 8px", borderRadius: 8, border: `1px solid ${theme.cardBorder}`, background: theme.softCardBackground, color: theme.mutedText, fontSize: 12, cursor: "pointer", outline: "none" }}
+                              >
+                                <option value="Pending">Pending</option>
+                                <option value="Present">Present</option>
+                                <option value="Absent">Absent</option>
+                              </select>
+                              <button
+                                onClick={() => onDeleteAttendance(record)} title="Delete record"
+                                style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${theme.cardBorder}`, background: theme.softCardBackground, color: "#ef4444", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}
+                              >🗑</button>
+                            </div>
+                          );
+                        }) : (
+                          <div style={{ padding: "36px 20px", textAlign: "center" }}>
+                            <div style={{ fontSize: 32, marginBottom: 10 }}>🕐</div>
+                            <div style={{ fontWeight: 700, fontSize: 15, color: theme.mutedText, marginBottom: 6 }}>
+                              {empAttFilter === "All" ? "No Attendance Records" : `No ${empAttFilter} Records`}
+                            </div>
+                            <div style={{ fontSize: 13, color: theme.subtleText }}>
+                              {empAttFilter === "All" ? "Reviewed attendance records will appear here." : `No ${empAttFilter.toLowerCase()} records found for this employee.`}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                   </div>
                 );
@@ -3192,11 +3603,11 @@ export default function AdminDashboard({
         )}
 
         {activeTab === "hr" && (
-          <div style={tabScrollAreaStyle}>
+          <div className="tab-scroll-area" style={tabScrollAreaStyle}>
             <div style={{ display: "grid", gap: 16 }}>
 
               {/* HR overview tiles — double as tab switcher */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              <div className="hr-overview-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                 {([
                   { id: "attendance" as HRSubTab, icon: "🕐", label: "Pending Attendance", value: pendingAttendanceCount, color: "#f59e0b" },
                   { id: "ohc"        as HRSubTab, icon: "⚕️", label: "OHC Alerts",          value: expiringSoonOHCCerts.length + expiredOHCCerts.length, color: "#ef4444" },
@@ -3272,7 +3683,7 @@ export default function AdminDashboard({
               {hrSubTab === "ohc" && (
                 <div style={{ display: "grid", gap: 14 }}>
                   {/* OHC stats strip */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                  <div className="ohc-stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
                     {[
                       { label: "Total",         value: ohcCertifications.length, color: "#6366f1" },
                       { label: "Active",        value: activeOHC.length,         color: "#10b981" },
@@ -3286,22 +3697,23 @@ export default function AdminDashboard({
                     ))}
                   </div>
 
-                  {/* Search + Add */}
-                  <div style={{ ...cardStyle(), padding: "12px 16px", display: "flex", gap: 10, alignItems: "center" }}>
+                  {/* Search + Add + Print */}
+                  <div className="ohc-action-bar" style={{ ...cardStyle(), padding: "12px 16px", display: "flex", gap: 10, alignItems: "center" }}>
                     <input
-                      style={{ ...inputStyle(), flex: 1 }}
+                      style={{ ...inputStyle(), flex: 1, minWidth: 0 }}
                       value={ohcSearch}
                       onChange={e => setOhcSearch(e.target.value)}
                       placeholder="🔍  Search by employee name…"
                     />
+                    <button style={buttonStyle(false)} onClick={handlePrintOHCReport}>🖨 Print Report</button>
                     <button style={buttonStyle(true)} onClick={openAddOHCForm}>+ Add Certificate</button>
                   </div>
 
                   {/* OHC Cards */}
                   <div style={{ display: "grid", gap: 10 }}>
                     {sortedOHC.length > 0 ? sortedOHC.map(item => {
-                      const status = getOHCStatus(item.expiryDate);
-                      const accentColor = status === "Expired" ? "#ef4444" : status === "Expires Today" ? "#f97316" : status === "Expiring Soon" ? "#f59e0b" : "#10b981";
+                      const status = getOHCDisplayStatus(item.expiryDate, item.applied);
+                      const accentColor = status === "Applied" ? "#3b82f6" : status === "Expired" ? "#ef4444" : status === "Expires Today" ? "#f97316" : status === "Expiring Soon" ? "#f59e0b" : "#10b981";
                       return (
                         <div key={item.id} style={{ background: theme.cardBackground, border: `1px solid ${theme.cardBorder}`, borderRadius: 12, borderLeft: `4px solid ${accentColor}`, overflow: "hidden" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
@@ -3356,13 +3768,14 @@ export default function AdminDashboard({
               {/* ── Birthdays ── */}
               {hrSubTab === "birthdays" && (
                 <div style={{ display: "grid", gap: 14 }}>
-                  {/* Header + search + add */}
+                  {/* Header + search + add + print */}
                   <div style={{ ...cardStyle(), padding: "12px 16px" }}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
+                    <div className="birthday-header">
                       <div style={{ fontWeight: 800, fontSize: 15, color: theme.title }}>🎂 Birthdays</div>
-                      <div style={{ flex: 1 }} />
                       <span style={{ fontSize: 12, color: theme.subtleText }}>{sortedBirthdays.length} records</span>
-                      <button style={buttonStyle(true)} onClick={() => setShowBirthdayModal(true)}>+ Add Birthday</button>
+                      <div style={{ flex: 1 }} />
+                      <button className="birthday-print-btn" style={buttonStyle(false)} onClick={handlePrintBirthdayReport}>🖨 Print Report</button>
+                      <button className="birthday-add-btn" style={buttonStyle(true)} onClick={() => setShowBirthdayModal(true)}>+ Add Birthday</button>
                     </div>
                     <input
                       style={inputStyle()}
@@ -3374,7 +3787,7 @@ export default function AdminDashboard({
 
                   {/* Birthday cards grid */}
                   {sortedBirthdays.length > 0 ? (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                    <div className="birthday-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                       {sortedBirthdays.map(item => {
                         const daysLeft = bdDaysUntil(item.birthday);
                         const isToday = daysLeft === 0;
@@ -3437,7 +3850,7 @@ export default function AdminDashboard({
         )}
 
         {activeTab === "invoices" && (
-          <div style={tabScrollAreaStyle}>
+          <div className="tab-scroll-area" style={tabScrollAreaStyle}>
             <div style={{ display: "grid", gap: 20 }}>
 
               {/* Stats strip */}
@@ -3588,7 +4001,7 @@ export default function AdminDashboard({
               </div>
 
               <div style={{ padding: "20px 24px" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <div className="form-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                   <div style={{ gridColumn: "1 / -1" }}>
                     <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Supplier Name</label>
                     <input style={inputStyle()} value={invoiceForm.supplierName} onChange={(e) => setInvoiceForm((prev) => ({ ...prev, supplierName: e.target.value }))} />
@@ -3817,7 +4230,7 @@ export default function AdminDashboard({
                 </div>
               </div>
 
-              <div style={{ padding: "20px 24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+              <div className="form-2col" style={{ padding: "20px 24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <div style={{ gridColumn: "1 / -1" }}>
                   <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Employee Name</label>
                   <input style={inputStyle()} value={ohcForm.name} onChange={(e) => setOhcForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Enter employee name" />
@@ -3843,6 +4256,47 @@ export default function AdminDashboard({
                     <div style={{ marginTop: 6, fontSize: 12, color: "#6366f1", display: "flex", alignItems: "center", gap: 4 }}>🖼 {ohcForm.certificatePhotoName || "Current cert kept"}</div>
                   )}
                 </div>
+
+                {editingOHC && onSetOHCApplied && getOHCStatus(editingOHC.expiryDate) === "Expired" && (
+                  <div style={{ gridColumn: "1 / -1", marginTop: 4, padding: "12px 14px", borderRadius: 12, border: `1px solid ${editingOHC.applied ? "#bfdbfe" : theme.cardBorder}`, background: editingOHC.applied ? "rgba(59,130,246,0.08)" : theme.softCardBackground, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <div style={{ flex: 1, minWidth: 180 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Renewal Status</div>
+                      <div style={{ fontSize: 13, color: theme.title, fontWeight: 600 }}>
+                        {editingOHC.applied
+                          ? "Marked as Applied — renewal is in progress."
+                          : "Certificate is Expired. Mark as Applied if a renewal request has been submitted."}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={ohcApplying}
+                      style={{
+                        ...buttonStyle(!editingOHC.applied),
+                        background: editingOHC.applied ? "transparent" : "#3b82f6",
+                        color: editingOHC.applied ? "#3b82f6" : "#fff",
+                        border: `1px solid #3b82f6`,
+                        opacity: ohcApplying ? 0.6 : 1,
+                      }}
+                      onClick={async () => {
+                        if (!editingOHC || !onSetOHCApplied) return;
+                        const next = !editingOHC.applied;
+                        try {
+                          setOhcApplying(true);
+                          await onSetOHCApplied(editingOHC.id, next);
+                          setEditingOHC({ ...editingOHC, applied: next });
+                          showToast("success", next ? "Marked as Applied." : "Applied status removed.");
+                        } catch (error) {
+                          console.error(error);
+                          showToast("error", "Could not update Applied status.");
+                        } finally {
+                          setOhcApplying(false);
+                        }
+                      }}
+                    >
+                      {ohcApplying ? "Saving…" : editingOHC.applied ? "↩ Remove Applied" : "📨 Mark as Applied"}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div style={{ padding: "14px 24px", borderTop: `1px solid ${theme.cardBorder}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: theme.softCardBackground }}>

@@ -10,23 +10,17 @@ export default function Icon() {
         style={{
           width: 32,
           height: 32,
-          background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+          background: "linear-gradient(145deg, #0f1c35 0%, #1b2a4a 100%)",
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          borderRadius: 8,
+          borderRadius: 7,
+          gap: 0,
         }}
       >
-        <span
-          style={{
-            color: "#ffffff",
-            fontSize: 11,
-            fontWeight: 900,
-            letterSpacing: "-0.02em",
-          }}
-        >
-          EI
-        </span>
+        <span style={{ color: "#F0C040", fontSize: 11, fontWeight: 900, letterSpacing: "0.04em", lineHeight: 1 }}>EI</span>
+        <span style={{ color: "#F0C040", fontSize: 11, fontWeight: 900, letterSpacing: "0.04em", lineHeight: 1 }}>HG</span>
       </div>
     ),
     { width: 32, height: 32 }

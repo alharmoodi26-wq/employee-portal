@@ -1061,6 +1061,62 @@ export function mapLegacySingleSubmittedFile(data: unknown): StorageFile[] {
   return [];
 }
 
+export function escHtml(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export function safeUrl(value: unknown): string {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (!/^(https?:|data:image\/)/i.test(raw)) return "";
+  return raw
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024; // 25 MB per file
+const ALLOWED_UPLOAD_MIME = new Set<string>([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "text/csv",
+]);
+const ALLOWED_UPLOAD_EXT = new Set<string>([
+  "jpg", "jpeg", "png", "gif", "webp", "heic", "heif",
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv",
+]);
+
+function sanitizeFileName(raw: string): string {
+  // Strip any path component, keep last segment only
+  const base = raw.split(/[\\/]/).pop() || "file";
+  // Replace anything that isn't alphanumeric, dot, dash, underscore
+  const cleaned = base.replace(/[^a-zA-Z0-9._-]/g, "_");
+  // Collapse repeated underscores / dots, strip leading dots (no hidden files)
+  const collapsed = cleaned.replace(/_+/g, "_").replace(/^\.+/, "");
+  // Cap total length so paths stay reasonable
+  const trimmed = collapsed.slice(0, 120);
+  return trimmed || "file";
+}
+
 export async function uploadFilesToStorage(
   baseFolder: string,
   ownerId: string,
@@ -1069,13 +1125,29 @@ export async function uploadFilesToStorage(
   const uploadedFiles: StorageFile[] = [];
 
   for (const file of files) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      throw new Error(
+        `File "${file.name}" is too large (max ${MAX_UPLOAD_BYTES / 1024 / 1024} MB).`
+      );
+    }
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    const mime = (file.type || "").toLowerCase();
+    const typeOk = mime && ALLOWED_UPLOAD_MIME.has(mime);
+    const extOk = ext && ALLOWED_UPLOAD_EXT.has(ext);
+    if (!typeOk && !extOk) {
+      throw new Error(
+        `File "${file.name}" has an unsupported type. Allowed: images, PDF, Word, Excel, PowerPoint, CSV, TXT.`
+      );
+    }
+
+    const safeName = sanitizeFileName(file.name);
     const filePath = `${baseFolder}/${ownerId}/${Date.now()}-${Math.random()
       .toString(36)
-      .slice(2, 8)}-${file.name}`;
+      .slice(2, 8)}-${safeName}`;
     const fileRef = ref(storage, filePath);
     await uploadBytes(fileRef, file);
     uploadedFiles.push({
-      name: file.name,
+      name: safeName,
       path: filePath,
       type: file.type || "",
     });
@@ -1335,55 +1407,58 @@ export function WorkCard({
     return detailsContent;
   }
 
+  const statusColor =
+    item.status === "Approved" ? "#10b981"
+    : item.status === "Pending Review" ? "#f59e0b"
+    : item.status === "Missing Attachment" ? "#ef4444"
+    : "#6366f1";
+
+  const statusIcon =
+    item.status === "Approved" ? "✅"
+    : item.status === "Pending Review" ? "⏳"
+    : item.status === "Missing Attachment" ? "📎"
+    : "🔨";
+
   return (
     <div
       style={{
-        ...hoverCardStyle(),
-        padding: 16,
-        borderRadius: 18,
-        transform: hovered ? "translateY(-2px)" : "translateY(0)",
-        boxShadow: hovered
-          ? "0 18px 38px rgba(15,23,42,0.10)"
-          : "0 10px 30px rgba(15,23,42,0.06)",
+        background: theme.cardBackground,
+        border: `1px solid ${theme.cardBorder}`,
+        borderLeft: `4px solid ${statusColor}`,
+        borderRadius: 12,
+        overflow: "hidden",
+        transition: "box-shadow 0.15s ease",
+        boxShadow: hovered ? "0 4px 20px rgba(0,0,0,0.09)" : theme.cardShadow,
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: 16,
-          alignItems: "flex-start",
-          flexWrap: "wrap",
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
+        <div style={{ width: 38, height: 38, borderRadius: 10, background: `${statusColor}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 }}>
+          {statusIcon}
+        </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div
-            style={{
-              fontSize: 18,
-              fontWeight: 800,
-              color: theme.title,
-              letterSpacing: "-0.02em",
-            }}
-          >
-            {item.title}
-          </div>
-
-          <div style={{ fontSize: 13, color: theme.subtleText, marginTop: 8 }}>
-            {item.employeeName} • {item.department} • {item.category} • {item.date}
+          <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</div>
+          <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
+            {[item.category, item.date].filter(Boolean).join(" · ")}
           </div>
         </div>
-
-        <div style={{ display: "grid", gap: 8, minWidth: isMobile ? 0 : 190, flexShrink: 0 }}>
-          <span style={badgeStyle(item.status)}>{item.status}</span>
-          <button style={smallButtonStyle()} onClick={() => setExpanded((prev) => !prev)}>
-            {expanded ? "Hide Details" : "View Details"}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <span style={{ display: "inline-block", padding: "3px 9px", borderRadius: 999, fontSize: 11, fontWeight: 800, background: (badgeStyle(item.status) as React.CSSProperties).background as string, color: (badgeStyle(item.status) as React.CSSProperties).color as string, border: (badgeStyle(item.status) as React.CSSProperties).border as string, whiteSpace: "nowrap" as const }}>{item.status}</span>
+          <button
+            style={{ width: 30, height: 30, borderRadius: 8, border: `1px solid ${theme.cardBorder}`, background: theme.fileCardBg, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, transition: "all 0.15s ease", flexShrink: 0, color: theme.mutedText }}
+            onClick={() => setExpanded((prev) => !prev)}
+            title={expanded ? "Hide details" : "View details"}
+          >
+            {expanded ? "▲" : "▼"}
           </button>
         </div>
       </div>
-
-      {expanded && detailsContent}
+      {expanded && (
+        <div style={{ borderTop: `1px solid ${theme.cardBorder}`, padding: "14px 16px" }}>
+          {detailsContent}
+        </div>
+      )}
     </div>
   );
 }
@@ -1775,7 +1850,7 @@ export function AttendanceCard({
           alignItems: "flex-start",
         }}
       >
-        <div style={{ flex: 1, minWidth: 250 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: theme.title }}>
             {record.employeeName}
           </div>
@@ -1794,7 +1869,7 @@ export function AttendanceCard({
           </div>
         </div>
 
-        <div style={{ display: "grid", gap: 8, minWidth: 180 }}>
+        <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
           <span style={badgeStyle(record.status)}>{record.status}</span>
 
           {canManageAttendance && (
@@ -1895,7 +1970,8 @@ export function getEmployeeReportData(
 export function downloadEmployeeReportAsPrintPage(
   employee: Employee,
   report: EmployeeReportData,
-  range?: ReportDateRange
+  range?: ReportDateRange,
+  photoUrl?: string
 ) {
   const popup = window.open("", "_blank", "width=1100,height=900");
   if (!popup) return;
@@ -1908,35 +1984,40 @@ export function downloadEmployeeReportAsPrintPage(
 
   const taskStatusBadge = (status: string) => {
     const map: Record<string, string> = { "Approved": "badge-approved", "Submitted": "badge-pending", "Active": "badge-active", "Pending": "badge-pending" };
-    return `<span class="badge ${map[status] || "badge-pending"}">${status}</span>`;
+    return `<span class="badge ${map[status] || "badge-pending"}">${escHtml(status)}</span>`;
   };
   const attBadge = (status: string) => {
     const map: Record<string, string> = { "Present": "badge-present", "Absent": "badge-absent", "Pending": "badge-pending" };
-    return `<span class="badge ${map[status] || "badge-pending"}">${status}</span>`;
+    return `<span class="badge ${map[status] || "badge-pending"}">${escHtml(status)}</span>`;
   };
 
   popup.document.write(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>HR Report — ${employee.name}</title>
+  <title>HR Report — ${escHtml(employee.name)}</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Segoe UI',Arial,sans-serif;color:#111827;background:#f8fafc}
     .page{max-width:960px;margin:0 auto;padding:40px 32px}
     /* Header */
-    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:22px;border-bottom:2px solid #e5e7eb;margin-bottom:26px}
-    .company{font-size:20px;font-weight:900;color:#1e293b}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:22px;border-bottom:3px solid #0f1c35;margin-bottom:26px}
+    .brand-box{display:flex;align-items:center;gap:14px}
+    .brand-icon{background:#0f1c35;border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;align-items:center;line-height:1.1}
+    .brand-icon .b1{font-size:16px;font-weight:900;color:#F0C040;letter-spacing:.03em}
+    .brand-icon .b2{font-size:9px;font-weight:700;color:#F0C040;letter-spacing:.12em;opacity:.85}
+    .company{font-size:20px;font-weight:900;color:#0f1c35}
     .company-sub{font-size:12px;color:#6b7280;margin-top:3px;font-weight:500}
     .report-meta{text-align:right;font-size:12px;color:#6b7280;line-height:1.9}
     .report-meta strong{color:#374151}
     /* Profile card */
     .profile-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;margin-bottom:24px}
-    .profile-banner{height:6px;background:linear-gradient(90deg,#6366f1,#3b82f6,#10b981)}
+    .profile-banner{height:7px;background:linear-gradient(90deg,#0f1c35,#1b2a4a,#F0C040)}
     .profile-body{padding:20px 24px;display:flex;gap:20px;align-items:center}
-    .avatar{width:68px;height:68px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#4f46e5);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:#fff;flex-shrink:0}
+    .avatar{width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#0f1c35,#1b2a4a);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:#F0C040;flex-shrink:0;border:3px solid #F0C040;overflow:hidden}
+    .avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
     .profile-info{flex:1}
-    .profile-name{font-size:22px;font-weight:900;color:#1e293b}
+    .profile-name{font-size:22px;font-weight:900;color:#0f1c35}
     .profile-role{font-size:13px;color:#6b7280;margin-top:3px}
     .profile-email{font-size:12px;color:#6b7280;margin-top:2px}
     .profile-range{font-size:12px;color:#6b7280;margin-top:2px}
@@ -1946,21 +2027,21 @@ export function downloadEmployeeReportAsPrintPage(
     .tile-label{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
     .tile-value{font-size:22px;font-weight:900}
     .tile-sub{font-size:10px;margin-top:3px;opacity:.75}
-    .tile-approved{background:#eff6ff;color:#1d4ed8}
+    .tile-approved{background:#e8f0fe;color:#0f1c35}
     .tile-active{background:#dbeafe;color:#1d4ed8}
     .tile-review{background:#fef3c7;color:#92400e}
     .tile-present{background:#dcfce7;color:#166534}
     .tile-absent{background:#fee2e2;color:#991b1b}
     /* Summary */
-    .summary-box{background:#f0f4ff;border:1px solid #c7d2fe;border-radius:10px;padding:14px 18px;margin-bottom:24px;font-size:13px;color:#3730a3;line-height:1.7}
+    .summary-box{background:#f5f3e8;border:1px solid #c9a520;border-left:4px solid #0f1c35;border-radius:10px;padding:14px 18px;margin-bottom:24px;font-size:13px;color:#0f1c35;line-height:1.7}
     /* Section */
     .section{margin-bottom:26px}
-    .section-title{font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#374151;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #e5e7eb;display:flex;align-items:center;gap:8px}
-    .section-count{background:#f1f5f9;color:#64748b;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:700}
+    .section-title{font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#0f1c35;margin-bottom:10px;padding-bottom:6px;border-bottom:2px solid #0f1c35;display:flex;align-items:center;gap:8px}
+    .section-count{background:#0f1c35;color:#F0C040;border-radius:999px;padding:1px 8px;font-size:11px;font-weight:700}
     /* Tables */
     table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:4px}
-    thead tr{background:#1e293b;color:#fff}
-    thead th{padding:9px 12px;text-align:left;font-weight:700;font-size:11px;letter-spacing:.04em}
+    thead tr{background:#0f1c35}
+    thead th{padding:9px 12px;text-align:left;font-weight:700;font-size:11px;letter-spacing:.04em;color:#F0C040}
     tbody tr:nth-child(even){background:#f8fafc}
     tbody tr:nth-child(odd){background:#fff}
     tbody td{padding:8px 12px;border-bottom:1px solid #e5e7eb;color:#374151}
@@ -1973,17 +2054,29 @@ export function downloadEmployeeReportAsPrintPage(
     .badge-present{background:#dcfce7;color:#166534}
     .badge-absent{background:#fee2e2;color:#991b1b}
     /* Footer */
-    .footer{margin-top:32px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
-    @media print{body{background:#fff}.page{padding:20px}}
+    .footer{margin-top:32px;padding-top:14px;border-top:2px solid #0f1c35;display:flex;justify-content:space-between;font-size:11px;color:#6b7280}
+    .no-print{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:8px;padding:10px 20px;background:#fff;border-bottom:1px solid #e5e7eb;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}}
   </style>
 </head>
 <body>
+<div class="no-print">
+  <button onclick="window.close()" style="padding:8px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,#0f1c35,#1b2a4a);color:#F0C040;cursor:pointer;font-size:13px;font-weight:700;letter-spacing:0.01em">← Back to Portal</button>
+  <button onclick="window.print()" style="padding:8px 20px;border-radius:8px;border:1px solid #0f1c35;background:#fff;color:#0f1c35;cursor:pointer;font-size:13px;font-weight:700">🖨 Print</button>
+  <span style="margin-left:4px;font-size:11px;color:#9ca3af">This button is hidden when printing</span>
+</div>
 <div class="page">
 
   <div class="header">
-    <div>
-      <div class="company">Emirates International Holdings Group</div>
-      <div class="company-sub">Human Resources — Employee Performance Report</div>
+    <div class="brand-box">
+      <div class="brand-icon">
+        <span class="b1">EIHG</span>
+        <span class="b2">PORTAL</span>
+      </div>
+      <div>
+        <div class="company">Emirates International Holdings Group</div>
+        <div class="company-sub">Human Resources — Employee Performance Report</div>
+      </div>
     </div>
     <div class="report-meta">
       <strong>Report ID:</strong> ${reportId}<br/>
@@ -1995,12 +2088,12 @@ export function downloadEmployeeReportAsPrintPage(
   <div class="profile-card">
     <div class="profile-banner"></div>
     <div class="profile-body">
-      <div class="avatar">${employee.name.charAt(0).toUpperCase()}</div>
+      <div class="avatar">${(photoUrl || employee.profilePhotoUrl) ? `<img src="${safeUrl(photoUrl || employee.profilePhotoUrl)}" alt="${escHtml(employee.name)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%" onerror="this.style.display='none'"/>` : escHtml(employee.name.charAt(0).toUpperCase())}</div>
       <div class="profile-info">
-        <div class="profile-name">${employee.name}</div>
-        <div class="profile-role">${employee.position} &nbsp;·&nbsp; ${employee.department}</div>
-        <div class="profile-email">✉ ${employee.email}</div>
-        ${range?.from || range?.to ? `<div class="profile-range">📅 Report Range: ${range?.from || "—"} to ${range?.to || "—"}</div>` : ""}
+        <div class="profile-name">${escHtml(employee.name)}</div>
+        <div class="profile-role">${escHtml(employee.position)} &nbsp;·&nbsp; ${escHtml(employee.department)}</div>
+        <div class="profile-email">✉ ${escHtml(employee.email)}</div>
+        ${range?.from || range?.to ? `<div class="profile-range">📅 Report Range: ${escHtml(range?.from || "—")} to ${escHtml(range?.to || "—")}</div>` : ""}
       </div>
     </div>
   </div>
@@ -2033,7 +2126,7 @@ export function downloadEmployeeReportAsPrintPage(
     </div>
   </div>
 
-  <div class="summary-box">📋 ${report.summary}</div>
+  <div class="summary-box">📋 ${escHtml(report.summary)}</div>
 
   <div class="section">
     <div class="section-title">✅ Approved Tasks <span class="section-count">${report.approvedTasks.length}</span></div>
@@ -2043,8 +2136,8 @@ export function downloadEmployeeReportAsPrintPage(
         ${report.approvedTasks.length > 0 ? report.approvedTasks.map((t, i) => `
         <tr>
           <td style="color:#9ca3af;font-size:11px">${i + 1}</td>
-          <td style="font-weight:600">${t.title}</td>
-          <td>${t.deadline || "—"}</td>
+          <td style="font-weight:600">${escHtml(t.title)}</td>
+          <td>${escHtml(t.deadline || "—")}</td>
           <td>${taskStatusBadge(t.status)}</td>
         </tr>`).join("") : `<tr class="empty-row"><td colspan="4">No approved tasks in this range</td></tr>`}
       </tbody>
@@ -2059,8 +2152,8 @@ export function downloadEmployeeReportAsPrintPage(
         ${report.approvedWorks.length > 0 ? report.approvedWorks.map((w, i) => `
         <tr>
           <td style="color:#9ca3af;font-size:11px">${i + 1}</td>
-          <td style="font-weight:600">${w.title}</td>
-          <td>${w.date || "—"}</td>
+          <td style="font-weight:600">${escHtml(w.title)}</td>
+          <td>${escHtml(w.date || "—")}</td>
           <td>${taskStatusBadge(w.status)}</td>
         </tr>`).join("") : `<tr class="empty-row"><td colspan="4">No approved works in this range</td></tr>`}
       </tbody>
@@ -2075,8 +2168,8 @@ export function downloadEmployeeReportAsPrintPage(
         ${report.activeTasks.length > 0 ? report.activeTasks.map((t, i) => `
         <tr>
           <td style="color:#9ca3af;font-size:11px">${i + 1}</td>
-          <td style="font-weight:600">${t.title}</td>
-          <td>${t.deadline || "—"}</td>
+          <td style="font-weight:600">${escHtml(t.title)}</td>
+          <td>${escHtml(t.deadline || "—")}</td>
           <td>${taskStatusBadge(t.status)}</td>
         </tr>`).join("") : `<tr class="empty-row"><td colspan="4">No active tasks</td></tr>`}
       </tbody>
@@ -2092,17 +2185,17 @@ export function downloadEmployeeReportAsPrintPage(
         ${report.submittedTasks.map((t, i) => `
         <tr>
           <td style="color:#9ca3af;font-size:11px">${i + 1}</td>
-          <td style="font-weight:600">${t.title}</td>
+          <td style="font-weight:600">${escHtml(t.title)}</td>
           <td><span class="badge badge-active">Task</span></td>
-          <td>${t.deadline || "—"}</td>
+          <td>${escHtml(t.deadline || "—")}</td>
           <td>${taskStatusBadge(t.status)}</td>
         </tr>`).join("")}
         ${report.pendingWorks.map((w, i) => `
         <tr>
           <td style="color:#9ca3af;font-size:11px">${report.submittedTasks.length + i + 1}</td>
-          <td style="font-weight:600">${w.title}</td>
+          <td style="font-weight:600">${escHtml(w.title)}</td>
           <td><span class="badge badge-pending">Work</span></td>
-          <td>${w.date || "—"}</td>
+          <td>${escHtml(w.date || "—")}</td>
           <td>${taskStatusBadge(w.status)}</td>
         </tr>`).join("")}
       </tbody>
@@ -2117,9 +2210,9 @@ export function downloadEmployeeReportAsPrintPage(
         ${report.employeeAttendance.length > 0 ? report.employeeAttendance.map((r, i) => `
         <tr>
           <td style="color:#9ca3af;font-size:11px">${i + 1}</td>
-          <td style="font-weight:600">${r.date}</td>
-          <td>${formatDateTime(r.checkIn)}</td>
-          <td>${r.checkOut ? formatDateTime(r.checkOut) : "—"}</td>
+          <td style="font-weight:600">${escHtml(r.date)}</td>
+          <td>${escHtml(formatDateTime(r.checkIn))}</td>
+          <td>${escHtml(r.checkOut ? formatDateTime(r.checkOut) : "—")}</td>
           <td>${attBadge(r.status)}</td>
         </tr>`).join("") : `<tr class="empty-row"><td colspan="5">No attendance records in this range</td></tr>`}
       </tbody>
@@ -2136,6 +2229,5 @@ export function downloadEmployeeReportAsPrintPage(
 </html>`);
 
   popup.document.close();
-  popup.focus();
-  popup.print();
+  setTimeout(() => popup.focus(), 100);
 }

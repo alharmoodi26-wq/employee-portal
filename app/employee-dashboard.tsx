@@ -32,6 +32,7 @@ import {
   SelectedFilesPreview,
   useIsMobile,
   MobileBottomNav,
+  escHtml,
 } from "./portal-utils";
 
 type InvoiceStatus = "Approved" | "Pending Review" | "Paid";
@@ -176,6 +177,7 @@ function getDaysBetweenDates(fromDate: string, toDate: string) {
 }
 
 function invoiceNeedsReview(item: InvoiceItem) {
+  if (item.status === "Approved" || item.status === "Paid") return false;
   if (item.status === "Pending Review") return true;
 
   if (!item.dateReceived || !item.dateApproved) return false;
@@ -641,18 +643,18 @@ export default function EmployeeDashboard({
     const paidTotal = paidItems.reduce((s, i) => s + Number(i.totalAmount || 0), 0);
     const approvedTotal = approvedItems.reduce((s, i) => s + Number(i.totalAmount || 0), 0);
     const activeFilters = [
-      invoiceSupplierFilter ? `Supplier: ${invoiceSupplierFilter}` : "",
-      invoiceStatusFilter !== "All" ? `Status: ${invoiceStatusFilter}` : "",
-      invoiceFromDate ? `From: ${invoiceFromDate}` : "",
-      invoiceToDate ? `To: ${invoiceToDate}` : "",
-      invoiceSearch ? `Search: ${invoiceSearch}` : "",
+      invoiceSupplierFilter ? `Supplier: ${escHtml(invoiceSupplierFilter)}` : "",
+      invoiceStatusFilter !== "All" ? `Status: ${escHtml(invoiceStatusFilter)}` : "",
+      invoiceFromDate ? `From: ${escHtml(invoiceFromDate)}` : "",
+      invoiceToDate ? `To: ${escHtml(invoiceToDate)}` : "",
+      invoiceSearch ? `Search: ${escHtml(invoiceSearch)}` : "",
     ].filter(Boolean);
 
     popup.document.write(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>Invoice Report — ${currentUser.name}</title>
+  <title>Invoice Report — ${escHtml(currentUser.name)}</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Segoe UI',Arial,sans-serif;color:#111827;background:#f9fafb}
@@ -688,10 +690,16 @@ export default function EmployeeDashboard({
     .amount-cell{font-weight:700;color:#1e293b;text-align:right}
     .totals-row td{background:#1e293b;color:#fff;font-weight:800;padding:10px 12px;font-size:13px}
     .footer{margin-top:28px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
-    @media print{body{background:#fff}.page{padding:20px}}
+    .no-print{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:8px;padding:10px 20px;background:#fff;border-bottom:1px solid #e5e7eb;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}}
   </style>
 </head>
 <body>
+<div class="no-print">
+  <button onclick="window.close()" style="padding:8px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;cursor:pointer;font-size:13px;font-weight:700">← Back to Portal</button>
+  <button onclick="window.print()" style="padding:8px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#1e293b;cursor:pointer;font-size:13px;font-weight:700">🖨 Print</button>
+  <span style="margin-left:4px;font-size:11px;color:#9ca3af">This button is hidden when printing</span>
+</div>
 <div class="page">
   <div class="header">
     <div>
@@ -699,8 +707,8 @@ export default function EmployeeDashboard({
       <div class="company-sub">Employee Invoice Report</div>
     </div>
     <div class="report-meta">
-      <strong>Employee:</strong> ${currentUser.name}<br/>
-      <strong>Department:</strong> ${currentUser.department}<br/>
+      <strong>Employee:</strong> ${escHtml(currentUser.name)}<br/>
+      <strong>Department:</strong> ${escHtml(currentUser.department)}<br/>
       <strong>Printed:</strong> ${new Date().toLocaleString()}<br/>
       <strong>Report ID:</strong> INV-${Date.now().toString().slice(-6)}
     </div>
@@ -753,11 +761,11 @@ export default function EmployeeDashboard({
       ${filteredInvoices.length > 0 ? filteredInvoices.map((item, idx) => `
       <tr>
         <td style="color:#9ca3af;font-size:12px">${idx + 1}</td>
-        <td style="font-weight:600">${item.supplierName}</td>
-        <td>${item.dateReceived || "—"}</td>
-        <td>${item.dateApproved || "—"}</td>
-        <td style="color:#6b7280;font-size:12px">${item.attachmentName || "—"}</td>
-        <td><span class="badge badge-${item.status === "Paid" ? "paid" : item.status === "Approved" ? "approved" : "pending"}">${item.status}</span></td>
+        <td style="font-weight:600">${escHtml(item.supplierName)}</td>
+        <td>${escHtml(item.dateReceived || "—")}</td>
+        <td>${escHtml(item.dateApproved || "—")}</td>
+        <td style="color:#6b7280;font-size:12px">${escHtml(item.attachmentName || "—")}</td>
+        <td><span class="badge badge-${item.status === "Paid" ? "paid" : item.status === "Approved" ? "approved" : "pending"}">${escHtml(item.status)}</span></td>
         <td class="amount-cell">${formatMoney(item.totalAmount)}</td>
       </tr>`).join("") : `<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:20px">No invoices found</td></tr>`}
       <tr class="totals-row">
@@ -1238,7 +1246,7 @@ export default function EmployeeDashboard({
 
         {/* ── Dashboard tab ── */}
         {activeTab === "dashboard" && (
-          <div style={tabScrollAreaStyle}>
+          <div className="tab-scroll-area" style={tabScrollAreaStyle}>
             <div style={{ display: "grid", gap: 20 }}>
 
               {/* Stats strip */}
@@ -1315,6 +1323,32 @@ export default function EmployeeDashboard({
                         </div>
                       ))}
                     </div>
+                    {/* Mobile-only Check In / Check Out action */}
+                    {isMobile && (
+                      <div style={{ marginTop: 12 }}>
+                        {!todayAttendance ? (
+                          <button
+                            style={{ width: "100%", padding: "13px 16px", borderRadius: 12, border: "none", background: "linear-gradient(135deg,#10b981,#059669)", color: "#fff", cursor: attendanceLoading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 700, opacity: attendanceLoading ? 0.7 : 1, letterSpacing: "0.01em" }}
+                            onClick={handleCheckIn}
+                            disabled={attendanceLoading}
+                          >
+                            {attendanceLoading ? "Checking In…" : "✓  Check In"}
+                          </button>
+                        ) : !todayAttendance.checkOut ? (
+                          <button
+                            style={{ width: "100%", padding: "13px 16px", borderRadius: 12, border: "none", background: "linear-gradient(135deg,#f59e0b,#d97706)", color: "#fff", cursor: attendanceLoading ? "not-allowed" : "pointer", fontSize: 15, fontWeight: 700, opacity: attendanceLoading ? 0.7 : 1, letterSpacing: "0.01em" }}
+                            onClick={handleCheckOut}
+                            disabled={attendanceLoading}
+                          >
+                            {attendanceLoading ? "Checking Out…" : "◷  Check Out"}
+                          </button>
+                        ) : (
+                          <div style={{ width: "100%", padding: "12px 16px", borderRadius: 12, background: "#dcfce7", color: "#166534", fontSize: 14, fontWeight: 700, textAlign: "center" as const }}>
+                            ✓  Attendance Recorded for Today
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -1447,11 +1481,11 @@ export default function EmployeeDashboard({
 
         {/* ── Tasks tab ── */}
         {activeTab === "tasks" && (
-          <div style={tabScrollAreaStyle}>
+          <div className="tab-scroll-area" style={tabScrollAreaStyle}>
             <div style={{ display: "grid", gap: 16 }}>
 
               {/* Stats strip */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              <div className="stat-grid-3col" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                 {[
                   { label: "Active Tasks",    value: activeTasks.length,    color: "#3b82f6", icon: "⚡", hint: "Assigned / In Progress / Needs Revision" },
                   { label: "Submitted",        value: submittedTasks.length,  color: "#f59e0b", icon: "📤", hint: "Waiting for admin review" },
@@ -1508,20 +1542,21 @@ export default function EmployeeDashboard({
 
         {/* ── Works tab ── */}
         {activeTab === "works" && (
-          <div style={tabScrollAreaStyle}>
+          <div className="tab-scroll-area" style={tabScrollAreaStyle}>
             <div style={{ display: "grid", gap: 16 }}>
 
               {/* Stats strip */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              <div className="stat-grid-3col" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                 {[
-                  { label: "Total Works",    value: myWorks.length,          color: "#6366f1", icon: "🔨" },
-                  { label: "Pending Review", value: nonApprovedWorks.length,  color: "#f59e0b", icon: "⏳" },
-                  { label: "Approved",       value: approvedWorks.length,     color: "#10b981", icon: "✅" },
-                ].map(({ label, value, color, icon }) => (
-                  <div key={label} style={{ background: theme.cardBackground, border: `1px solid ${theme.cardBorder}`, borderTop: `3px solid ${color}`, borderRadius: 12, padding: "14px 16px" }}>
-                    <div style={{ fontSize: 20, marginBottom: 6 }}>{icon}</div>
+                  { label: "Total Works",    value: myWorks.length,          color: "#6366f1", icon: "🔨", hint: "Submitted" },
+                  { label: "Pending Review", value: nonApprovedWorks.length,  color: "#f59e0b", icon: "⏳", hint: "Awaiting" },
+                  { label: "Approved",       value: approvedWorks.length,     color: "#10b981", icon: "✅", hint: "Completed" },
+                ].map(({ label, value, color, icon, hint }) => (
+                  <div key={label} style={{ background: theme.cardBackground, borderTop: `3px solid ${color}`, border: `1px solid ${theme.cardBorder}`, borderRadius: 12, padding: "14px 16px", boxShadow: theme.cardShadow }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 9, background: `${color}18`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, marginBottom: 8 }}>{icon}</div>
                     <div style={{ fontSize: 11, color: theme.subtleText, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
-                    <div style={{ fontSize: 28, fontWeight: 900, color, lineHeight: 1 }}>{value}</div>
+                    <div style={{ fontSize: 28, fontWeight: 900, color, lineHeight: 1, marginBottom: 3 }}>{value}</div>
+                    <div style={{ fontSize: 11, color: theme.subtleText }}>{hint}</div>
                   </div>
                 ))}
               </div>
@@ -1534,7 +1569,7 @@ export default function EmployeeDashboard({
                     <div style={{ fontSize: 15, fontWeight: 800, color: theme.title }}>Add New Work</div>
                   </div>
                   <div style={{ padding: "18px 20px" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                    <div className="form-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                       <div>
                         <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase" as const, letterSpacing: "0.05em" }}>Title</label>
                         <input style={inputStyle()} value={form.title} onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))} placeholder="Enter work title" />
@@ -1575,14 +1610,15 @@ export default function EmployeeDashboard({
               )}
 
               {/* Works list */}
-              <div style={cardStyle()}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-                  <div>
+              <div style={{ ...cardStyle(), padding: 0, overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", borderBottom: `1px solid ${theme.cardBorder}`, background: theme.softCardBackground }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 9, background: "rgba(99,102,241,0.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🔨</div>
+                  <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 800, fontSize: 15, color: theme.title }}>Your Works</div>
-                    <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>{myWorks.length} total · {approvedWorks.length} approved</div>
+                    <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 1 }}>{myWorks.length} total · {approvedWorks.length} approved</div>
                   </div>
                 </div>
-                <div style={{ display: "grid", gap: 12 }}>
+                <div style={{ padding: "14px 16px", display: "grid", gap: 10 }}>
                   {myWorks.length > 0 ? myWorks.map((item) => (
                     <WorkCard key={item.id} item={item} />
                   )) : (
@@ -1601,11 +1637,11 @@ export default function EmployeeDashboard({
           const absentCount  = myAttendance.filter(r => r.status === "Absent").length;
           const attRate = reviewedAttendance.length > 0 ? Math.round((presentCount / reviewedAttendance.length) * 100) : 0;
           return (
-            <div style={tabScrollAreaStyle}>
+            <div className="tab-scroll-area" style={tabScrollAreaStyle}>
               <div style={{ display: "grid", gap: 16 }}>
 
                 {/* Stats strip */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
+                <div className="stat-grid-5col" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
                   {[
                     { label: "Present",   value: presentCount,             color: "#10b981", icon: "✅" },
                     { label: "Absent",    value: absentCount,              color: "#ef4444", icon: "❌" },
@@ -1797,11 +1833,11 @@ export default function EmployeeDashboard({
             return matchSearch && matchType;
           });
           return (
-            <div style={tabScrollAreaStyle}>
+            <div className="tab-scroll-area" style={tabScrollAreaStyle}>
               <div style={{ display: "grid", gap: 16 }}>
 
                 {/* Stats strip */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+                <div className="stat-grid-3col" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
                   {[
                     { label: "Approved Tasks", value: approvedTasks.length, color: "#22c55e", icon: "✅" },
                     { label: "Approved Works", value: approvedWorks.length, color: "#10b981", icon: "🏆" },
@@ -1952,7 +1988,7 @@ export default function EmployeeDashboard({
 
         {/* ── Invoices tab ── */}
         {activeTab === "invoices" && (
-          <div style={tabScrollAreaStyle}>
+          <div className="tab-scroll-area" style={tabScrollAreaStyle}>
             <div style={{ display: "grid", gap: 20 }}>
 
               {/* Stats strip */}

@@ -20,7 +20,7 @@
 }
 
 body {
-  background: var(--background);
+  background: #0f1c35;
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
   overflow-x: hidden;
@@ -28,6 +28,7 @@ body {
 
 html {
   overflow-x: hidden;
+  background: #0f1c35;
 }
 
 @keyframes fadeInTab {
@@ -53,6 +54,19 @@ html {
 .emp-info-grid  { grid-template-columns: repeat(2, 1fr); }
 .emp-stat-tiles { grid-template-columns: repeat(4, 1fr); }
 
+/* ─── Stat grids ─────────────────────────────────────── */
+.stat-grid-3col    { grid-template-columns: repeat(3, 1fr); }
+.stat-grid-5col    { grid-template-columns: repeat(5, 1fr); }
+.hr-overview-grid  { grid-template-columns: repeat(3, 1fr); }
+.ohc-stats-grid    { grid-template-columns: repeat(4, 1fr); }
+.birthday-grid     { grid-template-columns: repeat(3, 1fr); }
+
+/* ─── 2-column form grids ────────────────────────────── */
+.form-2col { grid-template-columns: 1fr 1fr; }
+
+/* ─── Birthday header ────────────────────────────────── */
+.birthday-header { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+
 /* ─── Mobile logout (hidden on desktop) ────────────── */
 .mobile-logout-btn {
   display: none;
@@ -68,7 +82,9 @@ html {
   left: 0;
   right: 0;
   z-index: 200;
-  height: 62px;
+  box-sizing: border-box;
+  height: calc(60px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
   align-items: stretch;
   justify-content: space-around;
 }
@@ -76,13 +92,26 @@ html {
 /* ─── Mobile  ≤ 767px ───────────────────────────────── */
 @media (max-width: 767px) {
   .portal-sidebar         { display: none !important; }
-  .portal-content         { margin-left: 0 !important; padding: 20px 14px 80px 14px !important; }
+  .portal-content         { margin-left: 0 !important; padding: 16px 12px calc(76px + env(safe-area-inset-bottom)) 12px !important; overflow-x: hidden !important; max-width: 100vw !important; box-sizing: border-box !important; }
+  .tab-scroll-area        { max-height: none !important; overflow-y: visible !important; overflow-x: hidden !important; padding-right: 0 !important; }
   .stat-grid-main         { grid-template-columns: repeat(2, 1fr) !important; }
+  .stat-grid-3col         { grid-template-columns: repeat(2, 1fr) !important; }
+  .stat-grid-5col         { grid-template-columns: repeat(2, 1fr) !important; }
+  .hr-overview-grid       { grid-template-columns: 1fr !important; }
+  .ohc-stats-grid         { grid-template-columns: repeat(2, 1fr) !important; }
+  .birthday-grid          { grid-template-columns: 1fr !important; }
+  .birthday-header        { flex-wrap: wrap !important; }
+  .birthday-print-btn     { width: 100% !important; order: 2 !important; }
+  .birthday-add-btn       { width: 100% !important; order: 3 !important; }
+  .ohc-action-bar         { flex-wrap: wrap !important; }
+  .ohc-action-bar input   { width: 100% !important; flex: none !important; }
+  .ohc-action-bar button  { flex: 1 1 auto !important; min-width: 0 !important; }
+  .form-2col              { grid-template-columns: 1fr !important; }
   .two-col-split          { grid-template-columns: 1fr !important; }
   .login-grid             { grid-template-columns: 1fr !important; max-width: 440px !important; border-radius: 20px !important; }
   .login-brand-panel      { display: none !important; }
   .login-form-panel       { border-radius: 20px !important; }
-  .portal-bottom-nav      { display: flex !important; }
+  .portal-bottom-nav      { display: flex !important; height: calc(60px + env(safe-area-inset-bottom)) !important; padding-bottom: env(safe-area-inset-bottom) !important; box-sizing: border-box !important; }
   .invoice-stats-grid     { grid-template-columns: repeat(2, 1fr) !important; }
   .invoice-filter-grid    { grid-template-columns: 1fr !important; }
   .mobile-logout-btn      { display: flex !important; }
@@ -93,13 +122,24 @@ html {
   .review-search-grid     { grid-template-columns: 1fr !important; }
   .emp-info-grid          { grid-template-columns: 1fr !important; }
   .emp-stat-tiles         { grid-template-columns: repeat(2, 1fr) !important; }
-  .emp-profile-actions    { width: 100% !important; }
+  .emp-profile-actions    { width: 100% !important; flex-wrap: wrap !important; }
+  .emp-profile-actions > button { flex: 1 1 auto !important; min-width: 0 !important; text-align: center !important; }
+  .emp-att-stats          { grid-template-columns: repeat(2, 1fr) !important; }
+
+  /* ── Prevent iOS Safari zoom on input focus (font-size must be ≥ 16px) ── */
+  input, input[type="text"], input[type="search"], input[type="email"],
+  input[type="password"], input[type="number"], input[type="date"],
+  input[type="file"], select, textarea {
+    font-size: 16px !important;
+  }
 }
 
 /* ─── Tablet  768px – 1023px ────────────────────────── */
 @media (min-width: 768px) and (max-width: 1023px) {
   .portal-content    { padding: 24px 20px 40px 20px !important; }
   .stat-grid-main    { grid-template-columns: repeat(3, 1fr) !important; }
+  .stat-grid-5col    { grid-template-columns: repeat(3, 1fr) !important; }
+  .ohc-stats-grid    { grid-template-columns: repeat(2, 1fr) !important; }
   .two-col-split     { grid-template-columns: 1fr !important; }
   .employee-grid     { grid-template-columns: repeat(2, 1fr) !important; }
   .invoice-stats-grid{ grid-template-columns: repeat(3, 1fr) !important; }

@@ -30,16 +30,12 @@ import AdminDashboard from "./admin-dashboard";
 import {
   AssignedTask,
   AttendanceRecord,
-  cardStyle,
   ConfirmModal,
   ConfirmState,
   Employee,
   getCurrentIsoString,
   getTodayDateString,
-  pageStyle,
   setThemeMode,
-  shellStyle,
-  SkeletonBlock,
   ThemeMode,
   Toast,
   ToastType,
@@ -69,6 +65,7 @@ type OHCCertificationEntry = {
   employeePhotoLink?: string;
   certificatePhotoPath?: string;
   certificatePhotoLink?: string;
+  applied?: boolean;
 };
 
 type InvoiceStatus = "Approved" | "Pending Review" | "Paid";
@@ -90,12 +87,66 @@ type InvoiceItem = {
   isDeleted?: boolean;
 };
 
+function AuthTransitionScreen({
+  message,
+  fading,
+  zIndex = 99999,
+}: {
+  message: string;
+  fading?: boolean;
+  zIndex?: number;
+}) {
+  return (
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      zIndex,
+      background: "linear-gradient(160deg, #0a1628 0%, #0f1c35 60%, #1b2a4a 100%)",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      animation: fading ? "authTransOut 0.35s ease-in forwards" : "authTransIn 0.22s ease-out forwards",
+      pointerEvents: fading ? "none" : "all",
+    }}>
+      <div style={{
+        width: 76, height: 76,
+        background: "linear-gradient(145deg, #0d1a30 0%, #1b2a4a 100%)",
+        borderRadius: 22,
+        border: "1.5px solid rgba(240,192,64,0.45)",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        boxShadow: "0 8px 32px rgba(240,192,64,0.12)",
+        gap: 3,
+      }}>
+        <span style={{ color: "#F0C040", fontSize: 21, fontWeight: 900, letterSpacing: "0.06em", lineHeight: 1 }}>EIHG</span>
+        <span style={{ color: "#c9a520", fontSize: 8, fontWeight: 700, letterSpacing: "0.22em", lineHeight: 1, opacity: 0.75 }}>PORTAL</span>
+      </div>
+      <div style={{ marginTop: 18, color: "#94a3b8", fontSize: 13, fontWeight: 600, letterSpacing: "0.04em" }}>
+        {message}
+        <span style={{ display: "inline-block", animation: "authDot 1.2s ease-in-out 0s infinite" }}>.</span>
+        <span style={{ display: "inline-block", animation: "authDot 1.2s ease-in-out 0.2s infinite" }}>.</span>
+        <span style={{ display: "inline-block", animation: "authDot 1.2s ease-in-out 0.4s infinite" }}>.</span>
+      </div>
+      <div style={{ marginTop: 26, width: 110, height: 2, borderRadius: 999, background: "rgba(240,192,64,0.08)", overflow: "hidden", position: "relative" }}>
+        <div style={{ position: "absolute", inset: 0, width: "45%", background: "linear-gradient(90deg, transparent, rgba(240,192,64,0.85), transparent)", animation: "authShimmer 1.5s ease-in-out 0.2s infinite", borderRadius: 999 }} />
+      </div>
+      <style>{`
+        @keyframes authTransIn  { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes authTransOut { from { opacity: 1 } to { opacity: 0 } }
+        @keyframes authDot { 0%, 80%, 100% { opacity: 0.25 } 40% { opacity: 1 } }
+        @keyframes authShimmer { 0% { transform: translateX(-220%) } 100% { transform: translateX(420%) } }
+      `}</style>
+    </div>
+  );
+}
+
 function LoginScreen({
   loginForm,
   setLoginForm,
   login,
   loginError,
   loginLoading,
+  loginSuccess,
   themeMode,
   onToggleTheme,
 }: {
@@ -104,6 +155,7 @@ function LoginScreen({
   login: () => Promise<void>;
   loginError: string;
   loginLoading: boolean;
+  loginSuccess: boolean;
   themeMode: ThemeMode;
   onToggleTheme: () => void;
 }) {
@@ -130,6 +182,8 @@ function LoginScreen({
   };
 
   return (
+    <>
+    <style>{loginKeyframes}</style>
     <div
       style={{
         minHeight: "100vh",
@@ -141,6 +195,7 @@ function LoginScreen({
         justifyContent: "center",
         padding: "24px 16px",
         position: "relative",
+        animation: loginSuccess ? "loginPageOut 0.55s ease-in forwards" : "loginPageIn 0.4s ease-out forwards",
       }}
     >
       {/* Theme toggle — icon only */}
@@ -181,6 +236,9 @@ function LoginScreen({
           boxShadow: isDark
             ? "0 32px 64px rgba(0,0,0,0.5)"
             : "0 24px 56px rgba(15,23,42,0.12)",
+          animation: loginSuccess
+            ? "loginCardOut 0.5s cubic-bezier(0.4,0,1,1) forwards"
+            : "loginCardIn 0.45s cubic-bezier(0,0,0.2,1) forwards",
         }}
       >
         {/* ── Left: brand panel ── */}
@@ -270,12 +328,13 @@ function LoginScreen({
           <div style={{ marginBottom: 16 }}>
             <label style={fieldLabelStyle}>Email address</label>
             <input
-              style={fieldInputStyle}
+              style={{ ...fieldInputStyle, opacity: loginLoading ? 0.55 : 1, transition: "opacity 0.2s" }}
               value={loginForm.email}
               onChange={(e) => setLoginForm((prev) => ({ ...prev, email: e.target.value }))}
               onKeyDown={(e) => { if (e.key === "Enter") login(); }}
               placeholder="you@company.com"
               autoComplete="email"
+              disabled={loginLoading}
             />
           </div>
 
@@ -283,12 +342,13 @@ function LoginScreen({
             <label style={fieldLabelStyle}>Password</label>
             <input
               type="password"
-              style={fieldInputStyle}
+              style={{ ...fieldInputStyle, opacity: loginLoading ? 0.55 : 1, transition: "opacity 0.2s" }}
               value={loginForm.password}
               onChange={(e) => setLoginForm((prev) => ({ ...prev, password: e.target.value }))}
               onKeyDown={(e) => { if (e.key === "Enter") login(); }}
               placeholder="Enter your password"
               autoComplete="current-password"
+              disabled={loginLoading}
             />
           </div>
 
@@ -303,6 +363,7 @@ function LoginScreen({
                 marginBottom: 16,
                 fontSize: 13,
                 fontWeight: 600,
+                animation: "loginErrIn 0.3s ease-out forwards",
               }}
             >
               {loginError}
@@ -315,21 +376,39 @@ function LoginScreen({
               padding: "13px 16px",
               borderRadius: 14,
               border: "none",
-              background: loginLoading
-                ? (isDark ? "#374151" : "#d1d5db")
-                : "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+              background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
               color: "#ffffff",
               cursor: loginLoading ? "not-allowed" : "pointer",
               fontWeight: 800,
               fontSize: 15,
-              opacity: loginLoading ? 0.8 : 1,
-              boxShadow: loginLoading ? "none" : "0 4px 16px rgba(99,102,241,0.38)",
+              boxShadow: loginLoading ? "0 4px 16px rgba(99,102,241,0.18)" : "0 4px 16px rgba(99,102,241,0.38)",
               letterSpacing: "0.01em",
+              position: "relative",
+              overflow: "hidden",
+              transition: "box-shadow 0.25s, transform 0.1s",
             }}
             onClick={login}
             disabled={loginLoading}
           >
-            {loginLoading ? "Signing in..." : "Sign In →"}
+            {/* Shimmer sweep — visible only while loading */}
+            {loginLoading && (
+              <span style={{
+                position: "absolute",
+                inset: 0,
+                background: "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.1) 50%, transparent 100%)",
+                animation: "authBtnShimmer 1.4s ease-in-out infinite",
+              }} />
+            )}
+            <span style={{ position: "relative", zIndex: 1, display: "inline-flex", alignItems: "center", gap: 1 }}>
+              {loginLoading ? (
+                <>
+                  Verifying
+                  <span style={{ display: "inline-block", animation: "authDot 1.2s ease-in-out 0s infinite" }}>.</span>
+                  <span style={{ display: "inline-block", animation: "authDot 1.2s ease-in-out 0.2s infinite" }}>.</span>
+                  <span style={{ display: "inline-block", animation: "authDot 1.2s ease-in-out 0.4s infinite" }}>.</span>
+                </>
+              ) : "Sign In →"}
+            </span>
           </button>
 
           <div
@@ -347,8 +426,19 @@ function LoginScreen({
         </div>
       </div>
     </div>
+    </>
   );
 }
+// keyframes for LoginScreen — injected once globally
+const loginKeyframes = `
+  @keyframes loginPageIn   { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes loginPageOut  { from { opacity: 1 } to { opacity: 0 } }
+  @keyframes loginCardIn   { from { opacity: 0; transform: translateY(14px) scale(0.99) } to { opacity: 1; transform: translateY(0) scale(1) } }
+  @keyframes loginCardOut  { from { opacity: 1; transform: translateY(0) scale(1) } to { opacity: 0; transform: translateY(-10px) scale(0.99) } }
+  @keyframes authBtnShimmer { 0% { transform: translateX(-150%) } 100% { transform: translateX(250%) } }
+  @keyframes authDot       { 0%, 80%, 100% { opacity: 0.25 } 40% { opacity: 1 } }
+  @keyframes loginErrIn    { from { opacity: 0; transform: translateY(-4px) } to { opacity: 1; transform: translateY(0) } }
+`;
 
 function getDaysBetweenDates(fromDate: string, toDate: string) {
   if (!fromDate || !toDate) return null;
@@ -403,7 +493,7 @@ export default function HomePage() {
   const [loadingOHC, setLoadingOHC] = useState(true);
   const [loadingInvoices, setLoadingInvoices] = useState(true);
   const [themeMode, setThemeModeState] = useState<ThemeMode>("light");
-  const [themeReady, setThemeReady] = useState(false);
+  const [themeReady, setThemeReady] = useState(true);
   const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState>({
     open: false,
@@ -411,6 +501,16 @@ export default function HomePage() {
     message: "",
     onConfirm: null,
   });
+
+  const splashStart = useRef(Date.now());
+  const [splashFadingOut, setSplashFadingOut] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
+  const [loginSuccess, setLoginSuccess] = useState(false);
+  const [loginAnimatingOut, setLoginAnimatingOut] = useState(false); // keeps LoginScreen mounted during exit animation
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutFading, setLogoutFading] = useState(false);
+  const [showLoginTransition, setShowLoginTransition] = useState(false);
+  const [loginTransitionFading, setLoginTransitionFading] = useState(false);
 
   // Pagination limits (admin only) — sized for 100-employee scale
   const [worksLimit, setWorksLimit] = useState(300);
@@ -494,6 +594,30 @@ export default function HomePage() {
 
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!loginSuccess) return;
+    setLoginAnimatingOut(true);     // keep LoginScreen in DOM during exit animation
+    setShowLoginTransition(true);   // "Signing in..." overlay covers the gap
+    setLoginTransitionFading(false);
+
+    const t1 = setTimeout(() => setLoginAnimatingOut(false), 580);   // unmount LoginScreen
+    const t2 = setTimeout(() => setLoginTransitionFading(true), 700); // dashboard painted → fade overlay
+    const t3 = setTimeout(() => setShowLoginTransition(false), 1150); // remove overlay from DOM
+
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
+  }, [loginSuccess]);
+
+  // Minimum 1.8s splash + 0.5s fade-out = ~2.3s total
+  useEffect(() => {
+    if (!loadingAuth && !splashDone) {
+      const elapsed = Date.now() - splashStart.current;
+      const waitFor = Math.max(0, 1800 - elapsed);
+      const t1 = setTimeout(() => setSplashFadingOut(true), waitFor);
+      const t2 = setTimeout(() => setSplashDone(true), waitFor + 500);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }
+  }, [loadingAuth, splashDone]);
 
   useEffect(() => {
     if (!currentUser || currentUser.role !== "admin") {
@@ -804,6 +928,7 @@ export default function HomePage() {
                 employeePhotoLink,
                 certificatePhotoPath: data.certificatePhotoPath ?? "",
                 certificatePhotoLink,
+                applied: data.applied === true,
               } as OHCCertificationEntry;
             })
           );
@@ -888,32 +1013,50 @@ export default function HomePage() {
       setLoginLoading(true);
       setLoginError("");
       await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
+      setLoginSuccess(true); // triggers exit animation; loginLoading stays true to keep button disabled
     } catch (error) {
       console.error(error);
       setLoginError("Invalid email or password.");
-    } finally {
       setLoginLoading(false);
     }
   };
 
   const logout = async () => {
-    await signOut(auth);
-    setCurrentUser(null);
-    setWorks([]);
-    setAssignedTasks([]);
-    setAttendance([]);
-    setUsers([]);
-    setBirthdays([]);
-    setOhcCertifications([]);
-    setInvoices([]);
-    setLoginForm({ email: "", password: "" });
-    setLoadingWorks(false);
-    setLoadingTasks(false);
-    setLoadingAttendance(false);
-    setLoadingBirthdays(false);
-    setLoadingOHC(false);
-    setLoadingInvoices(false);
-    showToast("info", "Logged out successfully.");
+    setIsLoggingOut(true);
+    setLogoutFading(false);
+    try {
+      await signOut(auth);
+      // Reset animation states BEFORE clearing currentUser
+      // so LoginScreen renders fresh (no leftover loginPageOut animation)
+      setLoginSuccess(false);
+      setLoginAnimatingOut(false);
+      setLoginLoading(false);
+      setLoginError("");
+      setCurrentUser(null);
+      setWorks([]);
+      setAssignedTasks([]);
+      setAttendance([]);
+      setUsers([]);
+      setBirthdays([]);
+      setOhcCertifications([]);
+      setInvoices([]);
+      setLoginForm({ email: "", password: "" });
+      setLoadingWorks(false);
+      setLoadingTasks(false);
+      setLoadingAttendance(false);
+      setLoadingBirthdays(false);
+      setLoadingOHC(false);
+      setLoadingInvoices(false);
+    } catch (error) {
+      console.error("Logout error:", error);
+      setLoginSuccess(false);
+      setLoginAnimatingOut(false);
+      setLoginLoading(false);
+      setLoginError("");
+    } finally {
+      setTimeout(() => setLogoutFading(true), 480);
+      setTimeout(() => setIsLoggingOut(false), 750);
+    }
   };
 
   const toggleTheme = () => {
@@ -1384,6 +1527,11 @@ export default function HomePage() {
     });
   };
 
+  const setOHCApplied = async (certificationId: string, applied: boolean) => {
+    const refDoc = doc(db, "ohcCertifications", certificationId);
+    await updateDoc(refDoc, { applied, updatedAt: serverTimestamp() });
+  };
+
   const deleteOHCCertification = async (certificationId: string, employeeName: string) => {
     setConfirmState({
       open: true,
@@ -1480,53 +1628,124 @@ export default function HomePage() {
     });
   };
 
-  if (
-    !themeReady ||
-    loadingAuth ||
-    loadingWorks ||
-    loadingTasks ||
-    loadingAttendance ||
-    loadingBirthdays ||
-    loadingOHC ||
-    loadingInvoices
-  ) {
+  if (!splashDone) {
     return (
-      <div style={pageStyle()}>
-        <div style={shellStyle(980)}>
-          <div style={{ ...cardStyle(), marginTop: 40 }}>
-            <SkeletonBlock height={28} />
-            <div style={{ marginTop: 16 }}>
-              <SkeletonBlock height={18} />
-            </div>
-            <div style={{ marginTop: 10 }}>
-              <SkeletonBlock height={18} />
-            </div>
-            <div style={{ marginTop: 28, display: "grid", gap: 12 }}>
-              <SkeletonBlock height={72} />
-              <SkeletonBlock height={72} />
-              <SkeletonBlock height={72} />
-            </div>
+      <div style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "linear-gradient(160deg, #0a1628 0%, #0f1c35 60%, #1b2a4a 100%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "column",
+        animation: splashFadingOut
+          ? "splashOut 0.5s ease-in forwards"
+          : "splashBgFade 0.5s ease-out forwards",
+      }}>
+
+        {/* Logo box */}
+        <div style={{
+          width: 92,
+          height: 92,
+          background: "linear-gradient(145deg, #0d1a30 0%, #1b2a4a 100%)",
+          borderRadius: 26,
+          border: "1.5px solid rgba(240,192,64,0.55)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 8px 40px rgba(240,192,64,0.15), 0 2px 12px rgba(0,0,0,0.5)",
+          gap: 3,
+          opacity: 0,
+          animation: "splashLogoIn 0.6s cubic-bezier(0.16,1,0.3,1) 0.1s forwards",
+        }}>
+          <span style={{ color: "#F0C040", fontSize: 26, fontWeight: 900, letterSpacing: "0.06em", lineHeight: 1 }}>EIHG</span>
+          <span style={{ color: "#c9a520", fontSize: 9, fontWeight: 700, letterSpacing: "0.22em", lineHeight: 1, opacity: 0.8 }}>PORTAL</span>
+        </div>
+
+        {/* Title */}
+        <div style={{
+          marginTop: 22,
+          textAlign: "center",
+          opacity: 0,
+          animation: "splashFadeUp 0.5s ease-out 0.4s forwards",
+        }}>
+          <div style={{ fontSize: 20, fontWeight: 900, color: "#F0C040", letterSpacing: "0.04em" }}>
+            EIHG Portal
           </div>
         </div>
+
+        {/* Subtitle */}
+        <div style={{
+          marginTop: 7,
+          textAlign: "center",
+          opacity: 0,
+          animation: "splashFade 0.5s ease-out 0.65s forwards",
+        }}>
+          <div style={{ fontSize: 12, color: "#4e6080", fontWeight: 500, letterSpacing: "0.03em" }}>
+            Emirates International Holdings Group
+          </div>
+        </div>
+
+        {/* Gold shimmer loading bar */}
+        <div style={{
+          marginTop: 48,
+          opacity: 0,
+          animation: "splashFade 0.4s ease-out 0.85s forwards",
+        }}>
+          <div style={{
+            width: 130,
+            height: 2,
+            borderRadius: 999,
+            background: "rgba(240,192,64,0.08)",
+            overflow: "hidden",
+            position: "relative",
+          }}>
+            <div style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "45%",
+              height: "100%",
+              background: "linear-gradient(90deg, transparent 0%, rgba(240,192,64,0.9) 50%, transparent 100%)",
+              animation: "shimmerBar 1.5s ease-in-out 1.1s infinite",
+              borderRadius: 999,
+            }} />
+          </div>
+        </div>
+
+        <style>{`
+          @keyframes splashBgFade  { from { opacity: 0 } to { opacity: 1 } }
+          @keyframes splashLogoIn  { from { opacity: 0; transform: scale(0.96) } to { opacity: 1; transform: scale(1) } }
+          @keyframes splashFadeUp  { from { opacity: 0; transform: translateY(7px) } to { opacity: 1; transform: translateY(0) } }
+          @keyframes splashFade    { from { opacity: 0 } to { opacity: 1 } }
+          @keyframes splashOut     { from { opacity: 1 } to { opacity: 0 } }
+          @keyframes shimmerBar    { 0% { transform: translateX(-220%) } 100% { transform: translateX(420%) } }
+        `}</style>
       </div>
     );
   }
 
   return (
     <>
+      {isLoggingOut    && <AuthTransitionScreen message="Signing out" fading={logoutFading}         zIndex={99999} />}
+      {showLoginTransition && <AuthTransitionScreen message="Signing in"  fading={loginTransitionFading} zIndex={9997}  />}
+
       {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
       <ConfirmModal
         state={confirmState}
         onClose={() => setConfirmState({ open: false, title: "", message: "", onConfirm: null })}
       />
 
-      {!currentUser ? (
+      {(!currentUser || loginAnimatingOut) ? (
         <LoginScreen
           loginForm={loginForm}
           setLoginForm={setLoginForm}
           login={login}
           loginError={loginError}
           loginLoading={loginLoading}
+          loginSuccess={loginSuccess}
           themeMode={themeMode}
           onToggleTheme={toggleTheme}
         />
@@ -1558,6 +1777,7 @@ export default function HomePage() {
           onAddOHCCertification={addOHCCertification}
           onUpdateOHCCertification={updateOHCCertification}
           onDeleteOHCCertification={deleteOHCCertification}
+          onSetOHCApplied={setOHCApplied}
           onUpdateInvoice={updateInvoice}
           onApproveInvoice={approveInvoice}
           onOpenInvoiceAttachment={openInvoiceAttachment}
