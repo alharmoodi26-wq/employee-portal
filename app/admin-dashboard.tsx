@@ -473,11 +473,12 @@ function BirthdayHeroCard({
                 }
               }}
             >
-              <Image
+              <img
                 src={item.photoLink || "/eihg-logo.jpeg"}
                 alt={item.name}
                 width={68}
                 height={68}
+                loading="lazy" decoding="async"
                 style={{
                   width: "100%",
                   height: "100%",
@@ -599,11 +600,12 @@ function OHCRenewalCard({
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <Image
+                <img
                   src={item.employeePhotoLink || "/eihg-logo.jpeg"}
                   alt={item.name}
                   width={54}
                   height={54}
+                  loading="lazy" decoding="async"
                   style={{
                     width: 54,
                     height: 54,
@@ -3715,12 +3717,13 @@ export default function AdminDashboard({
                       const status = getOHCDisplayStatus(item.expiryDate, item.applied);
                       const accentColor = status === "Applied" ? "#3b82f6" : status === "Expired" ? "#ef4444" : status === "Expires Today" ? "#f97316" : status === "Expiring Soon" ? "#f59e0b" : "#10b981";
                       return (
-                        <div key={item.id} style={{ background: theme.cardBackground, border: `1px solid ${theme.cardBorder}`, borderRadius: 12, borderLeft: `4px solid ${accentColor}`, overflow: "hidden" }}>
+                        <div key={item.id} style={{ background: theme.cardBackground, border: `1px solid ${theme.cardBorder}`, borderRadius: 12, borderLeft: `4px solid ${accentColor}`, overflow: "hidden", contentVisibility: "auto", containIntrinsicSize: "70px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
                             {/* Employee photo */}
-                            <Image
+                            <img
                               src={item.employeePhotoLink || "/eihg-logo.jpeg"}
                               alt={item.name} width={44} height={44}
+                              loading="lazy" decoding="async"
                               style={{ width: 44, height: 44, borderRadius: "50%", objectFit: "cover", flexShrink: 0, cursor: item.employeePhotoLink ? "pointer" : "default", border: `2px solid ${accentColor}30` }}
                               onClick={() => item.employeePhotoLink && setOhcPreview({ title: `${item.name} — Employee Photo`, image: item.employeePhotoLink })}
                             />
@@ -3735,9 +3738,10 @@ export default function AdminDashboard({
                             </div>
 
                             {/* Certificate thumbnail */}
-                            <Image
+                            <img
                               src={item.certificatePhotoLink || "/eihg-logo.jpeg"}
                               alt="cert" width={58} height={40}
+                              loading="lazy" decoding="async"
                               style={{ width: 58, height: 40, borderRadius: 8, objectFit: "cover", border: `1px solid ${theme.cardBorder}`, flexShrink: 0, cursor: item.certificatePhotoLink ? "pointer" : "default" }}
                               onClick={() => item.certificatePhotoLink && setOhcPreview({ title: `${item.name} — Certificate`, image: item.certificatePhotoLink })}
                             />
@@ -3803,11 +3807,14 @@ export default function AdminDashboard({
                             padding: "14px 14px 12px",
                             display: "flex", flexDirection: "column", gap: 10,
                             boxShadow: isToday ? "0 0 0 2px rgba(236,72,153,0.2)" : "none",
+                            contentVisibility: "auto",
+                            containIntrinsicSize: "120px",
                           }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                               {item.photoLink ? (
-                                <Image
+                                <img
                                   src={item.photoLink} alt={item.name} width={46} height={46}
+                                  loading="lazy" decoding="async"
                                   style={{ width: 46, height: 46, borderRadius: "50%", objectFit: "cover", flexShrink: 0, cursor: "pointer", border: `2px solid ${pillColor}40` }}
                                   onClick={() => setBirthdayPreview({ title: `${item.name} — Birthday Photo`, image: item.photoLink! })}
                                 />
