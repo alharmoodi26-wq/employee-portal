@@ -627,7 +627,10 @@ export default function EmployeeDashboard({
       setShowInvoiceForm(false);
     } catch (error) {
       console.error(error);
-      showToast("error", editingInvoice ? "Error updating invoice." : "Error adding invoice.");
+      const message = error instanceof Error && error.message
+        ? error.message
+        : (editingInvoice ? "Error updating invoice." : "Error adding invoice.");
+      showToast("error", message);
     } finally {
       setInvoiceSaving(false);
     }

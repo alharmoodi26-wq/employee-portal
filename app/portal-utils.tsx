@@ -1132,7 +1132,11 @@ export async function uploadFilesToStorage(
     }
     const ext = (file.name.split(".").pop() || "").toLowerCase();
     const mime = (file.type || "").toLowerCase();
-    const typeOk = mime && ALLOWED_UPLOAD_MIME.has(mime);
+    // Accept any image/* or text/* by category, plus our allow-listed document MIMEs and extensions
+    const typeOk =
+      mime.startsWith("image/") ||
+      mime.startsWith("text/") ||
+      ALLOWED_UPLOAD_MIME.has(mime);
     const extOk = ext && ALLOWED_UPLOAD_EXT.has(ext);
     if (!typeOk && !extOk) {
       throw new Error(
