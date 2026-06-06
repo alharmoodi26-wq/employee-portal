@@ -11,6 +11,7 @@ type ExtractedFields = {
   customer_name: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
+  stamp_date: string | null;
   total_amount: number | null;
   currency: string | null;
   trn_or_vat_number: string | null;
@@ -18,20 +19,43 @@ type ExtractedFields = {
   warnings: string[];
 };
 
-const PROMPT = `You are an invoice extraction engine. Extract these fields from the invoice image or PDF:
+const PROMPT = `You are an invoice extraction engine. Extract these fields from the invoice image or PDF.
 
-- supplier_name: the company that issued the invoice (the seller / vendor name printed at the top)
-- customer_name: the company or person the invoice is billed to (often labeled "Bill To", "Customer", "العميل")
+CRITICAL DATE RULES — read carefully:
+
+There are TWO different dates we need, and they MUST NOT be confused:
+
+1) "invoice_date" = the PRINTED date at the TOP of the invoice document
+   - This is the date the supplier issued the invoice.
+   - It is usually printed near the supplier letterhead, near "Date:", "Invoice Date:", "التاريخ:".
+   - Normalize to YYYY-MM-DD.
+   - If unclear, return null and add a warning. Do NOT guess.
+
+2) "stamp_date" = the date written or stamped INSIDE a received/approval stamp
+   - Look for stamps or boxes containing words like:
+     "GOODS RECEIVED", "RECEIVED", "APPROVED", "Received by", "Name & Signature",
+     "GRN", "استلمت", "تم الاستلام", "معتمد".
+   - Inside or right next to that stamp, find the date and use THAT as stamp_date.
+   - Normalize to YYYY-MM-DD.
+   - If the stamp date is covered by a signature, smudged, partial, or unclear, return null
+     and add a warning. Do NOT guess.
+
+NEVER put the stamp date in invoice_date.
+NEVER put the top invoice date in stamp_date.
+If you only see ONE date and there is no stamp, put it in invoice_date and leave stamp_date null.
+
+Other fields:
+- supplier_name: the company that issued the invoice (seller / vendor name at the top)
+- customer_name: the company or person the invoice is billed to ("Bill To", "Customer", "العميل")
 - invoice_number: the invoice number / reference
-- invoice_date: the invoice issue date — normalize to YYYY-MM-DD
 - total_amount: the final total amount as a number (no currency symbol, no commas)
 - currency: 3-letter currency code if visible (e.g. AED, USD, SAR, EUR)
 - trn_or_vat_number: TRN or VAT registration number if visible (UAE TRN is 15 digits)
 
-Rules:
+General rules:
 - If a value is not clearly visible, return null. Do NOT guess.
 - Provide a confidence score from 0 to 1 for each field based on how certain you are.
-- Add warnings (strings) for fields that look unclear, ambiguous, or partial.
+- Add short warnings (strings) for fields that are unclear, ambiguous, partial, or where a stamp/signature obscures the value.
 
 Return ONLY valid JSON in this exact shape (no markdown, no commentary):
 {
@@ -39,6 +63,7 @@ Return ONLY valid JSON in this exact shape (no markdown, no commentary):
   "customer_name": null,
   "invoice_number": null,
   "invoice_date": null,
+  "stamp_date": null,
   "total_amount": null,
   "currency": null,
   "trn_or_vat_number": null,
@@ -47,6 +72,7 @@ Return ONLY valid JSON in this exact shape (no markdown, no commentary):
     "customer_name": 0,
     "invoice_number": 0,
     "invoice_date": 0,
+    "stamp_date": 0,
     "total_amount": 0,
     "currency": 0,
     "trn_or_vat_number": 0
@@ -136,6 +162,7 @@ export async function POST(req: NextRequest) {
       customer_name: typeof parsed.customer_name === "string" ? parsed.customer_name : null,
       invoice_number: typeof parsed.invoice_number === "string" ? parsed.invoice_number : null,
       invoice_date: typeof parsed.invoice_date === "string" ? parsed.invoice_date : null,
+      stamp_date: typeof parsed.stamp_date === "string" ? parsed.stamp_date : null,
       total_amount: typeof parsed.total_amount === "number" ? parsed.total_amount : null,
       currency: typeof parsed.currency === "string" ? parsed.currency : null,
       trn_or_vat_number: typeof parsed.trn_or_vat_number === "string" ? parsed.trn_or_vat_number : null,
@@ -146,6 +173,9 @@ export async function POST(req: NextRequest) {
     // Light validation hints
     if (safe.invoice_date && !/^\d{4}-\d{2}-\d{2}$/.test(safe.invoice_date)) {
       safe.warnings.push("Invoice date is not in YYYY-MM-DD format — please review.");
+    }
+    if (safe.stamp_date && !/^\d{4}-\d{2}-\d{2}$/.test(safe.stamp_date)) {
+      safe.warnings.push("Stamp date is not in YYYY-MM-DD format — please review.");
     }
     if (safe.total_amount !== null && (Number.isNaN(safe.total_amount) || safe.total_amount <= 0)) {
       safe.warnings.push("Total amount looks invalid — please review.");

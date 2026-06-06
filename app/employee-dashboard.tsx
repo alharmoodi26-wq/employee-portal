@@ -533,12 +533,17 @@ export default function EmployeeDashboard({
         typeof data.invoice_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.invoice_date)
           ? data.invoice_date
           : "";
+      const stampDate =
+        typeof data.stamp_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.stamp_date)
+          ? data.stamp_date
+          : "";
 
       const filledCount =
         (supplierName ? 1 : 0) +
         (customerName ? 1 : 0) +
         (totalAmount !== null ? 1 : 0) +
-        (invoiceDate ? 1 : 0);
+        (invoiceDate ? 1 : 0) +
+        (stampDate ? 1 : 0);
 
       if (filledCount === 0) {
         showToast(
@@ -554,7 +559,8 @@ export default function EmployeeDashboard({
         supplierName: supplierName || prev.supplierName,
         customerName: customerName || prev.customerName,
         totalAmount: totalAmount !== null ? String(totalAmount) : prev.totalAmount,
-        dateReceived: invoiceDate || prev.dateReceived,
+        dateReceived: invoiceDate || prev.dateReceived,   // top-of-invoice date
+        dateApproved: stampDate || prev.dateApproved,     // stamp date (GRN / Received / Approved)
       }));
       setScanConfidence(
         data.confidence && typeof data.confidence === "object"
@@ -2375,7 +2381,12 @@ export default function EmployeeDashboard({
                   </div>
 
                   <div>
-                    <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Date Received</label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Date Received
+                      {scanConfidence && typeof scanConfidence.invoice_date === "number" && scanConfidence.invoice_date < 0.85 && (
+                        <span style={{ fontSize: 10, fontWeight: 800, color: "#92400e", background: "#fef3c7", padding: "2px 6px", borderRadius: 999 }}>⚠ Review</span>
+                      )}
+                    </label>
                     <input
                       type="date" style={inputStyle()}
                       value={invoiceForm.dateReceived}
@@ -2384,7 +2395,12 @@ export default function EmployeeDashboard({
                   </div>
 
                   <div>
-                    <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Date Approved</label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Date Approved
+                      {scanConfidence && typeof scanConfidence.stamp_date === "number" && scanConfidence.stamp_date < 0.85 && (
+                        <span style={{ fontSize: 10, fontWeight: 800, color: "#92400e", background: "#fef3c7", padding: "2px 6px", borderRadius: 999 }}>⚠ Review</span>
+                      )}
+                    </label>
                     <input
                       type="date" style={inputStyle()}
                       value={invoiceForm.dateApproved}
