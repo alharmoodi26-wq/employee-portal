@@ -34,9 +34,25 @@ import {
   useIsMobile,
   MobileBottomNav,
   escHtml,
+  uploadFilesToStorage,
 } from "./portal-utils";
 
 type InvoiceStatus = "Approved" | "Pending Review" | "Paid";
+
+type ExtractionStatus = "ready_for_review" | "pending_review" | "failed" | "duplicate";
+
+type BulkExtractedInvoice = {
+  first_page: number | null;
+  last_page: number | null;
+  supplier_name: string | null;
+  customer_name: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  stamp_date: string | null;
+  total_amount: number | null;
+  confidence: Record<string, number>;
+  warnings: string[];
+};
 
 type InvoiceItem = {
   id: string;
@@ -45,6 +61,7 @@ type InvoiceItem = {
   employeeEmail: string;
   supplierName: string;
   customerName: string;
+  invoiceNumber?: string;
   dateReceived: string;
   dateApproved: string;
   totalAmount: number;
@@ -54,6 +71,15 @@ type InvoiceItem = {
   attachmentType?: string;
   attachmentLink?: string;
   isDeleted?: boolean;
+  sourceBatchId?: string;
+  attachmentPageStart?: number;
+  attachmentPageEnd?: number;
+  extractionStatus?: ExtractionStatus;
+  extractionConfidence?: Record<string, number>;
+  reviewReasons?: string[];
+  failedReason?: string;
+  duplicateOfId?: string;
+  archived?: boolean;
 };
 
 type EmployeeTab =
@@ -104,6 +130,15 @@ type EmployeeDashboardProps = {
   ) => Promise<void>;
   onDeleteInvoice: (invoiceId: string) => Promise<void>;
   onOpenInvoiceAttachment: (path?: string, link?: string) => Promise<void> | void;
+  onBulkAddInvoices: (
+    extracted: BulkExtractedInvoice[],
+    attachment: { path: string; name: string; type: string; totalPages: number }
+  ) => Promise<{
+    batchId: string;
+    summary: { ready: number; pending: number; duplicate: number; failed: number };
+  }>;
+  onArchiveInvoice: (invoiceId: string) => Promise<void>;
+  onClearExtractionStatus: (invoiceId: string) => Promise<void>;
   onSubmitTask: (id: string, submittedNotes: string, submittedFiles: File[]) => Promise<void>;
   onCheckIn: () => Promise<void>;
   onCheckOut: (attendanceId: string) => Promise<void>;
@@ -221,6 +256,33 @@ function matchesInvoiceFilters(
   return supplierOk && statusOk && fromOk && toOk;
 }
 
+function ExtractionStatusBadge({ status }: { status?: ExtractionStatus }) {
+  if (!status) return null;
+  const map: Record<ExtractionStatus, { label: string; bg: string; color: string }> = {
+    ready_for_review: { label: "✓ Ready", bg: "#dcfce7", color: "#166534" },
+    pending_review: { label: "⚠ Needs Review", bg: "#fef3c7", color: "#92400e" },
+    failed: { label: "✗ Failed", bg: "#fee2e2", color: "#991b1b" },
+    duplicate: { label: "⚡ Duplicate", bg: "#ffedd5", color: "#9a3412" },
+  };
+  const s = map[status];
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 10,
+        fontWeight: 800,
+        background: s.bg,
+        color: s.color,
+      }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
 function InvoiceCard({
   item,
   onDeleteInvoice,
@@ -276,7 +338,10 @@ function InvoiceCard({
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
             <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: `${accentColor}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🧾</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.supplierName}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.supplierName || "(no supplier)"}</div>
+                <ExtractionStatusBadge status={item.extractionStatus} />
+              </div>
               {item.customerName && (
                 <div style={{ fontSize: 11, color: theme.subtleText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Customer: {item.customerName}</div>
               )}
@@ -295,7 +360,10 @@ function InvoiceCard({
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: `${accentColor}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🧾</div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.supplierName}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.supplierName || "(no supplier)"}</div>
+              <ExtractionStatusBadge status={item.extractionStatus} />
+            </div>
             {item.customerName && (
               <div style={{ fontSize: 11, color: theme.subtleText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Customer: {item.customerName}</div>
             )}
@@ -345,6 +413,9 @@ export default function EmployeeDashboard({
   onUpdateInvoice,
   onDeleteInvoice,
   onOpenInvoiceAttachment,
+  onBulkAddInvoices,
+  onArchiveInvoice,
+  onClearExtractionStatus,
   onSubmitTask,
   onCheckIn,
   onCheckOut,
@@ -458,6 +529,97 @@ export default function EmployeeDashboard({
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState("All");
   const [invoiceFromDate, setInvoiceFromDate] = useState("");
   const [invoiceToDate, setInvoiceToDate] = useState("");
+  const [invoiceSourceFilter, setInvoiceSourceFilter] = useState<"all" | "bulk" | "manual">("all");
+
+  type BulkStep = "upload" | "processing" | "summary" | "review";
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkStep, setBulkStep] = useState<BulkStep>("upload");
+  const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<string>("");
+  const [bulkBatchId, setBulkBatchId] = useState<string>("");
+  const [bulkSummary, setBulkSummary] = useState<{
+    ready: number;
+    pending: number;
+    duplicate: number;
+    failed: number;
+  } | null>(null);
+  const bulkInputRef = useRef<HTMLInputElement | null>(null);
+
+  const resetBulk = () => {
+    setBulkStep("upload");
+    setBulkFile(null);
+    setBulkProgress("");
+    setBulkBatchId("");
+    setBulkSummary(null);
+    if (bulkInputRef.current) bulkInputRef.current.value = "";
+  };
+
+  const handleBulkScan = async () => {
+    if (!bulkFile) return;
+    if (bulkStep === "processing") return;
+
+    try {
+      setBulkStep("processing");
+
+      setBulkProgress("Uploading PDF…");
+      const uploaded = await uploadFilesToStorage("invoice-files", currentUser.uid, [bulkFile]);
+      const attachment = {
+        path: uploaded[0]?.path ?? "",
+        name: uploaded[0]?.name ?? bulkFile.name,
+        type: uploaded[0]?.type ?? "application/pdf",
+        totalPages: 0,
+      };
+
+      setBulkProgress("Extracting invoices…");
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error("Please sign in again.");
+
+      const fd = new FormData();
+      fd.append("file", bulkFile);
+      const res = await fetch("/api/invoices/extract-bulk", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` },
+        body: fd,
+      });
+
+      let data: Record<string, unknown> = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error("حدث خطأ أثناء قراءة الفاتورة. يرجى المحاولة مرة أخرى.");
+      }
+      console.log("[bulk-scan] response", res.status, data);
+
+      if (!res.ok) {
+        const code = typeof data?.code === "string" ? data.code : "";
+        if (res.status === 429 || code === "quota_exceeded") {
+          throw new Error("تم الوصول إلى حد استخدام Gemini مؤقتًا. يرجى المحاولة بعد دقيقة.");
+        }
+        if (code === "file_invalid") {
+          throw new Error("نوع الملف أو حجمه غير مدعوم. يرجى رفع PDF بحجم مناسب.");
+        }
+        throw new Error("حدث خطأ أثناء قراءة الفاتورة. يرجى المحاولة مرة أخرى.");
+      }
+
+      const extracted = (Array.isArray(data.invoices) ? data.invoices : []) as BulkExtractedInvoice[];
+      if (extracted.length === 0) {
+        showToast("error", "No invoices detected in the PDF.");
+        setBulkStep("upload");
+        return;
+      }
+
+      setBulkProgress(`Creating ${extracted.length} invoice records…`);
+      const result = await onBulkAddInvoices(extracted, attachment);
+      setBulkBatchId(result.batchId);
+      setBulkSummary(result.summary);
+      setBulkStep("summary");
+      showToast("success", `${extracted.length} invoice(s) processed.`);
+    } catch (error) {
+      console.error("[bulk-scan] error", error);
+      showToast("error", error instanceof Error ? error.message : "Bulk scan failed.");
+      setBulkStep("upload");
+    }
+  };
 
   const [selectedWorkFiles, setSelectedWorkFiles] = useState<File[]>([]);
   const [selectedInvoiceFile, setSelectedInvoiceFile] = useState<File | null>(null);
@@ -616,8 +778,16 @@ export default function EmployeeDashboard({
   };
 
   const filteredInvoices = useMemo(() => {
-    return myInvoices.filter(
-      (item) =>
+    return myInvoices.filter((item) => {
+      // Hide failed/duplicate from main list — they only show in batch review
+      if (item.extractionStatus === "failed" || item.extractionStatus === "duplicate") return false;
+      // Hide archived
+      if (item.archived) return false;
+      // Source filter
+      if (invoiceSourceFilter === "bulk" && !item.sourceBatchId) return false;
+      if (invoiceSourceFilter === "manual" && item.sourceBatchId) return false;
+
+      return (
         matchesInvoiceSearch(item, invoiceSearch) &&
         matchesInvoiceFilters(
           item,
@@ -626,7 +796,8 @@ export default function EmployeeDashboard({
           invoiceFromDate,
           invoiceToDate
         )
-    );
+      );
+    });
   }, [
     myInvoices,
     invoiceSearch,
@@ -634,7 +805,13 @@ export default function EmployeeDashboard({
     invoiceStatusFilter,
     invoiceFromDate,
     invoiceToDate,
+    invoiceSourceFilter,
   ]);
+
+  const batchInvoices = useMemo(
+    () => (bulkBatchId ? myInvoices.filter((i) => i.sourceBatchId === bulkBatchId) : []),
+    [myInvoices, bulkBatchId]
+  );
 
   const invoiceTotalAmount = useMemo(
     () => filteredInvoices.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0),
@@ -753,6 +930,10 @@ export default function EmployeeDashboard({
           currentAttachmentName: editingInvoice.attachmentName,
           currentAttachmentType: editingInvoice.attachmentType,
         });
+        // If this was a bulk-extracted invoice, clear extractionStatus so it leaves the review queue
+        if (editingInvoice.extractionStatus && editingInvoice.extractionStatus !== "duplicate" && editingInvoice.extractionStatus !== "failed") {
+          await onClearExtractionStatus(editingInvoice.id);
+        }
         showToast("success", "Invoice updated successfully.");
       } else {
         await onAddInvoice({
@@ -1376,15 +1557,26 @@ export default function EmployeeDashboard({
           )}
 
           {activeTab === "invoices" && (
-            <button
-              style={buttonStyle(true)}
-              onClick={() => {
-                resetInvoiceForm();
-                setShowInvoiceForm(true);
-              }}
-            >
-              + Add Invoice
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                style={{ ...buttonStyle(false), whiteSpace: "nowrap" }}
+                onClick={() => {
+                  resetBulk();
+                  setBulkOpen(true);
+                }}
+              >
+                📚 Bulk Scan PDF
+              </button>
+              <button
+                style={buttonStyle(true)}
+                onClick={() => {
+                  resetInvoiceForm();
+                  setShowInvoiceForm(true);
+                }}
+              >
+                + Add Invoice
+              </button>
+            </div>
           )}
         </div>
 
@@ -2461,6 +2653,154 @@ export default function EmployeeDashboard({
         )}
 
         </div>{/* end animation wrapper */}
+
+        {bulkOpen && (
+          <div style={{
+            position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 2100, padding: 20,
+          }}>
+            <div style={{ ...cardStyle(), maxWidth: 720, width: "100%", borderRadius: 18, overflow: "hidden", padding: 0, maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+              <div style={{ padding: "18px 24px", borderBottom: `1px solid ${theme.cardBorder}`, display: "flex", alignItems: "center", gap: 12, background: theme.softCardBackground }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(99,102,241,0.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📚</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 17, fontWeight: 900, color: theme.title }}>
+                    {bulkStep === "upload" && "Bulk Scan — Upload PDF"}
+                    {bulkStep === "processing" && "Processing…"}
+                    {bulkStep === "summary" && "Batch Summary"}
+                    {bulkStep === "review" && "Batch Review"}
+                  </div>
+                  <div style={{ fontSize: 12, color: theme.subtleText }}>
+                    {bulkStep === "upload" && "Upload a PDF that contains multiple invoices"}
+                    {bulkStep === "processing" && "Hang on, this may take 30-60 seconds"}
+                    {bulkStep === "summary" && "Here is what we extracted"}
+                    {bulkStep === "review" && "Review each invoice from this batch"}
+                  </div>
+                </div>
+                {bulkStep !== "processing" && (
+                  <button
+                    style={{ ...buttonStyle(false), padding: "6px 12px" }}
+                    onClick={() => { setBulkOpen(false); resetBulk(); }}
+                  >Close</button>
+                )}
+              </div>
+
+              <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
+                {bulkStep === "upload" && (
+                  <div>
+                    <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>PDF File (up to 25 MB)</label>
+                    <input
+                      ref={bulkInputRef}
+                      type="file"
+                      accept="application/pdf"
+                      style={inputStyle()}
+                      onChange={(e) => setBulkFile(e.target.files?.[0] || null)}
+                    />
+                    {bulkFile && (
+                      <div style={{ marginTop: 10, fontSize: 12, color: theme.subtleText }}>
+                        📎 {bulkFile.name} · {(bulkFile.size / 1024 / 1024).toFixed(2)} MB
+                      </div>
+                    )}
+                    <div style={{ marginTop: 20, padding: 12, background: theme.softCardBackground, borderRadius: 10, fontSize: 12, color: theme.subtleText, lineHeight: 1.6 }}>
+                      <strong style={{ color: theme.title }}>How it works:</strong><br/>
+                      1. Upload a single PDF that contains multiple invoices.<br/>
+                      2. AI detects each invoice and extracts fields.<br/>
+                      3. You review each extracted invoice before final approval.<br/>
+                      4. Duplicates and failed invoices are kept for history.
+                    </div>
+                    <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", gap: 10 }}>
+                      <button
+                        style={{ ...buttonStyle(true), opacity: bulkFile ? 1 : 0.6 }}
+                        onClick={handleBulkScan}
+                        disabled={!bulkFile}
+                      >📚 Start Scan</button>
+                    </div>
+                  </div>
+                )}
+
+                {bulkStep === "processing" && (
+                  <div style={{ padding: "40px 0", textAlign: "center" }}>
+                    <div style={{ fontSize: 36, marginBottom: 14 }}>⏳</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: theme.title }}>{bulkProgress}</div>
+                    <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 6 }}>Please don&apos;t close this window.</div>
+                  </div>
+                )}
+
+                {bulkStep === "summary" && bulkSummary && (
+                  <div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 16 }}>
+                      <div style={{ padding: 14, background: "#dcfce7", borderRadius: 10, textAlign: "center" }}>
+                        <div style={{ fontSize: 24, fontWeight: 900, color: "#166534" }}>{bulkSummary.ready}</div>
+                        <div style={{ fontSize: 10, color: "#166534", fontWeight: 800, textTransform: "uppercase" }}>Ready</div>
+                      </div>
+                      <div style={{ padding: 14, background: "#fef3c7", borderRadius: 10, textAlign: "center" }}>
+                        <div style={{ fontSize: 24, fontWeight: 900, color: "#92400e" }}>{bulkSummary.pending}</div>
+                        <div style={{ fontSize: 10, color: "#92400e", fontWeight: 800, textTransform: "uppercase" }}>Pending</div>
+                      </div>
+                      <div style={{ padding: 14, background: "#ffedd5", borderRadius: 10, textAlign: "center" }}>
+                        <div style={{ fontSize: 24, fontWeight: 900, color: "#9a3412" }}>{bulkSummary.duplicate}</div>
+                        <div style={{ fontSize: 10, color: "#9a3412", fontWeight: 800, textTransform: "uppercase" }}>Duplicate</div>
+                      </div>
+                      <div style={{ padding: 14, background: "#fee2e2", borderRadius: 10, textAlign: "center" }}>
+                        <div style={{ fontSize: 24, fontWeight: 900, color: "#991b1b" }}>{bulkSummary.failed}</div>
+                        <div style={{ fontSize: 10, color: "#991b1b", fontWeight: 800, textTransform: "uppercase" }}>Failed</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                      <button style={buttonStyle(false)} onClick={() => { setBulkOpen(false); resetBulk(); }}>Close</button>
+                      <button style={buttonStyle(true)} onClick={() => setBulkStep("review")}>View Batch Review →</button>
+                    </div>
+                  </div>
+                )}
+
+                {bulkStep === "review" && (
+                  <div>
+                    <div style={{ marginBottom: 12, fontSize: 12, color: theme.subtleText }}>
+                      {batchInvoices.length} invoice(s) in this batch · Click ✏️ to review/edit
+                    </div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {batchInvoices.map((inv) => (
+                        <div key={inv.id} style={{ padding: "10px 12px", border: `1px solid ${theme.cardBorder}`, borderRadius: 10, background: theme.cardBackground }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+                            <ExtractionStatusBadge status={inv.extractionStatus} />
+                            <div style={{ fontWeight: 700, fontSize: 13, color: theme.title, flex: 1, minWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{inv.supplierName || "(no supplier)"}</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: theme.title }}>AED {formatMoney(inv.totalAmount)}</div>
+                            <div style={{ display: "flex", gap: 4 }}>
+                              {(inv.attachmentPath || inv.attachmentLink) && (
+                                <button title="View PDF" style={invoiceIconBtn(theme)} onClick={() => onOpenInvoiceAttachment(inv.attachmentPath, inv.attachmentLink)}>📎</button>
+                              )}
+                              {inv.extractionStatus !== "duplicate" && (
+                                <button title="Edit / Review" style={invoiceIconBtn(theme)} onClick={() => {
+                                  openEditInvoice(inv);
+                                  setBulkOpen(false);
+                                }}>✏️</button>
+                              )}
+                              {(inv.extractionStatus === "failed" || inv.extractionStatus === "duplicate") && (
+                                <button title="Archive (hide from history)" style={{ ...invoiceIconBtn(theme), color: "#6b7280" }} onClick={async () => {
+                                  await onArchiveInvoice(inv.id);
+                                  showToast("success", "Archived.");
+                                }}>📦</button>
+                              )}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 11, color: theme.subtleText }}>
+                            Pages {inv.attachmentPageStart ?? "?"}-{inv.attachmentPageEnd ?? "?"} · Date: {inv.dateReceived || "—"}
+                            {inv.invoiceNumber ? ` · #${inv.invoiceNumber}` : ""}
+                          </div>
+                          {inv.reviewReasons && inv.reviewReasons.length > 0 && (
+                            <ul style={{ margin: "6px 0 0 18px", padding: 0, fontSize: 11, color: "#92400e", listStyle: "disc" }}>
+                              {inv.reviewReasons.map((r, idx) => <li key={idx}>{r}</li>)}
+                            </ul>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </main>
 
       <MobileBottomNav

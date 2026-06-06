@@ -67,6 +67,8 @@ type OHCCertificationEntry = {
 
 type InvoiceStatus = "Approved" | "Pending Review" | "Paid";
 
+type ExtractionStatus = "ready_for_review" | "pending_review" | "failed" | "duplicate";
+
 type InvoiceItem = {
   id: string;
   employeeUid: string;
@@ -74,6 +76,7 @@ type InvoiceItem = {
   employeeEmail: string;
   supplierName: string;
   customerName: string;
+  invoiceNumber?: string;
   dateReceived: string;
   dateApproved: string;
   totalAmount: number;
@@ -83,6 +86,15 @@ type InvoiceItem = {
   attachmentType?: string;
   attachmentLink?: string;
   isDeleted?: boolean;
+  sourceBatchId?: string;
+  attachmentPageStart?: number;
+  attachmentPageEnd?: number;
+  extractionStatus?: ExtractionStatus;
+  extractionConfidence?: Record<string, number>;
+  reviewReasons?: string[];
+  failedReason?: string;
+  duplicateOfId?: string;
+  archived?: boolean;
 };
 
 type EmployeeProfileTab =

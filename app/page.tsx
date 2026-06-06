@@ -70,6 +70,8 @@ type OHCCertificationEntry = {
 
 type InvoiceStatus = "Approved" | "Pending Review" | "Paid";
 
+type ExtractionStatus = "ready_for_review" | "pending_review" | "failed" | "duplicate";
+
 type InvoiceItem = {
   id: string;
   employeeUid: string;
@@ -77,6 +79,7 @@ type InvoiceItem = {
   employeeEmail: string;
   supplierName: string;
   customerName: string;
+  invoiceNumber?: string;
   dateReceived: string;
   dateApproved: string;
   totalAmount: number;
@@ -86,6 +89,16 @@ type InvoiceItem = {
   attachmentType?: string;
   attachmentLink?: string;
   isDeleted?: boolean;
+  // Bulk-scan extraction metadata (optional)
+  sourceBatchId?: string;
+  attachmentPageStart?: number;
+  attachmentPageEnd?: number;
+  extractionStatus?: ExtractionStatus;
+  extractionConfidence?: Record<string, number>;
+  reviewReasons?: string[];
+  failedReason?: string;
+  duplicateOfId?: string;
+  archived?: boolean;
 };
 
 function AuthTransitionScreen({
@@ -977,6 +990,7 @@ export default function HomePage() {
             employeeEmail: data.employeeEmail ?? "",
             supplierName: data.supplierName ?? "",
             customerName: data.customerName ?? "",
+            invoiceNumber: data.invoiceNumber ?? "",
             dateReceived: data.dateReceived ?? "",
             dateApproved: data.dateApproved ?? "",
             totalAmount:
@@ -988,6 +1002,17 @@ export default function HomePage() {
             attachmentPath: data.attachmentPath ?? "",
             attachmentType: data.attachmentType ?? "",
             attachmentLink: data.attachmentLink ?? "",
+            sourceBatchId: data.sourceBatchId ?? "",
+            attachmentPageStart:
+              typeof data.attachmentPageStart === "number" ? data.attachmentPageStart : undefined,
+            attachmentPageEnd:
+              typeof data.attachmentPageEnd === "number" ? data.attachmentPageEnd : undefined,
+            extractionStatus: data.extractionStatus,
+            extractionConfidence: data.extractionConfidence ?? undefined,
+            reviewReasons: Array.isArray(data.reviewReasons) ? data.reviewReasons : undefined,
+            failedReason: data.failedReason ?? undefined,
+            duplicateOfId: data.duplicateOfId ?? undefined,
+            archived: data.archived === true,
             isDeleted: data.isDeleted ?? false,
           };
         });
@@ -1226,6 +1251,200 @@ export default function HomePage() {
     await updateDoc(refDoc, {
       status: "Approved",
       dateApproved: approvedDate,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  type BulkExtractedInvoice = {
+    first_page: number | null;
+    last_page: number | null;
+    supplier_name: string | null;
+    customer_name: string | null;
+    invoice_number: string | null;
+    invoice_date: string | null;
+    stamp_date: string | null;
+    total_amount: number | null;
+    confidence: Record<string, number>;
+    warnings: string[];
+  };
+
+  const classifyExtraction = (
+    inv: BulkExtractedInvoice,
+    existingMatch: InvoiceItem | undefined
+  ): { extractionStatus: ExtractionStatus; reviewReasons: string[]; failedReason?: string } => {
+    const reasons: string[] = [];
+
+    if (existingMatch) {
+      return {
+        extractionStatus: "duplicate",
+        reviewReasons: [
+          `Duplicate of existing invoice from ${existingMatch.supplierName} on ${existingMatch.dateReceived} (AED ${existingMatch.totalAmount}).`,
+        ],
+      };
+    }
+
+    if (inv.first_page === null || inv.last_page === null) {
+      return {
+        extractionStatus: "failed",
+        reviewReasons: ["Could not determine the page range for this invoice."],
+        failedReason: "page_range_undetected",
+      };
+    }
+
+    const allMissing =
+      !inv.supplier_name && !inv.customer_name && !inv.total_amount && !inv.invoice_date;
+    if (allMissing) {
+      return {
+        extractionStatus: "failed",
+        reviewReasons: ["No invoice fields could be extracted."],
+        failedReason: "no_fields_extracted",
+      };
+    }
+
+    if (!inv.supplier_name) reasons.push("Supplier Name is missing.");
+    if (!inv.customer_name) reasons.push("Customer Name is missing.");
+    if (inv.total_amount === null || inv.total_amount === 0) {
+      reasons.push("Total Amount is missing or zero.");
+    }
+    if (!inv.invoice_date) reasons.push("Invoice date is missing.");
+
+    const conf = inv.confidence || {};
+    const checkConf = (key: string, label: string) => {
+      const c = conf[key];
+      if (typeof c === "number" && c < 0.8) {
+        reasons.push(`${label} confidence is ${Math.round(c * 100)}% — please verify.`);
+      }
+    };
+    checkConf("supplier_name", "Supplier Name");
+    checkConf("customer_name", "Customer Name");
+    checkConf("total_amount", "Total Amount");
+    checkConf("invoice_date", "Invoice date");
+    checkConf("page_range", "Invoice boundaries");
+
+    if (Array.isArray(inv.warnings)) {
+      for (const w of inv.warnings) {
+        if (typeof w === "string" && w.trim()) reasons.push(w);
+      }
+    }
+
+    return {
+      extractionStatus: reasons.length === 0 ? "ready_for_review" : "pending_review",
+      reviewReasons: reasons,
+    };
+  };
+
+  const findDuplicateInvoice = (
+    inv: BulkExtractedInvoice,
+    list: InvoiceItem[]
+  ): InvoiceItem | undefined => {
+    const supplier = (inv.supplier_name || "").trim().toLowerCase();
+    const customer = (inv.customer_name || "").trim().toLowerCase();
+    const total = inv.total_amount;
+    const date = inv.invoice_date || "";
+    const invNumber = (inv.invoice_number || "").trim().toLowerCase();
+
+    return list.find((existing) => {
+      if (existing.isDeleted) return false;
+      if (existing.archived) return false;
+      if (existing.extractionStatus === "failed") return false;
+      if (existing.extractionStatus === "duplicate") return false;
+
+      if (invNumber && existing.invoiceNumber && existing.invoiceNumber.trim().toLowerCase() === invNumber) {
+        return true;
+      }
+
+      const sameSupplier = supplier && existing.supplierName.trim().toLowerCase() === supplier;
+      const sameCustomer = !customer || existing.customerName.trim().toLowerCase() === customer;
+      const sameTotal = total !== null && Math.abs(existing.totalAmount - total) < 0.01;
+      const sameDate = date && existing.dateReceived === date;
+
+      return Boolean(sameSupplier && sameCustomer && sameTotal && sameDate);
+    });
+  };
+
+  const bulkAddInvoices = async (
+    extracted: BulkExtractedInvoice[],
+    attachment: { path: string; name: string; type: string; totalPages: number }
+  ): Promise<{
+    batchId: string;
+    summary: { ready: number; pending: number; duplicate: number; failed: number };
+  }> => {
+    if (!currentUser) {
+      throw new Error("Not signed in.");
+    }
+
+    const batchId = `batch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const existingList = invoices;
+
+    let ready = 0;
+    let pending = 0;
+    let duplicate = 0;
+    let failed = 0;
+
+    for (const inv of extracted) {
+      const match = findDuplicateInvoice(inv, existingList);
+      const classification = classifyExtraction(inv, match);
+
+      if (classification.extractionStatus === "ready_for_review") ready++;
+      else if (classification.extractionStatus === "pending_review") pending++;
+      else if (classification.extractionStatus === "duplicate") duplicate++;
+      else failed++;
+
+      const totalAmount = typeof inv.total_amount === "number" ? inv.total_amount : 0;
+      const dateReceived =
+        typeof inv.invoice_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(inv.invoice_date)
+          ? inv.invoice_date
+          : "";
+      const dateApproved =
+        typeof inv.stamp_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(inv.stamp_date)
+          ? inv.stamp_date
+          : "";
+
+      const docData: Record<string, unknown> = {
+        employeeUid: currentUser.uid,
+        employeeName: currentUser.name,
+        employeeEmail: currentUser.email,
+        supplierName: inv.supplier_name || "",
+        customerName: inv.customer_name || "",
+        invoiceNumber: inv.invoice_number || "",
+        dateReceived,
+        dateApproved,
+        totalAmount,
+        status: "Pending Review",
+        attachmentName: attachment.name,
+        attachmentPath: attachment.path,
+        attachmentType: attachment.type,
+        attachmentLink: "",
+        isDeleted: false,
+        sourceBatchId: batchId,
+        attachmentPageStart: inv.first_page ?? null,
+        attachmentPageEnd: inv.last_page ?? null,
+        extractionStatus: classification.extractionStatus,
+        extractionConfidence: inv.confidence ?? {},
+        reviewReasons: classification.reviewReasons,
+        extractedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      if (classification.failedReason) docData.failedReason = classification.failedReason;
+      if (match) docData.duplicateOfId = match.id;
+
+      await addDoc(collection(db, "invoices"), docData);
+    }
+
+    return { batchId, summary: { ready, pending, duplicate, failed } };
+  };
+
+  const archiveInvoice = async (invoiceId: string) => {
+    const refDoc = doc(db, "invoices", invoiceId);
+    await updateDoc(refDoc, { archived: true, updatedAt: serverTimestamp() });
+  };
+
+  const clearExtractionStatus = async (invoiceId: string) => {
+    const refDoc = doc(db, "invoices", invoiceId);
+    await updateDoc(refDoc, {
+      extractionStatus: null,
+      reviewReasons: [],
       updatedAt: serverTimestamp(),
     });
   };
@@ -1805,6 +2024,9 @@ export default function HomePage() {
           onUpdateInvoice={updateInvoice}
           onDeleteInvoice={deleteInvoice}
           onOpenInvoiceAttachment={openInvoiceAttachment}
+          onBulkAddInvoices={bulkAddInvoices}
+          onArchiveInvoice={archiveInvoice}
+          onClearExtractionStatus={clearExtractionStatus}
           onSubmitTask={submitTask}
           onCheckIn={checkIn}
           onCheckOut={checkOut}
