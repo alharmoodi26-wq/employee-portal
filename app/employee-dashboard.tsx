@@ -43,6 +43,7 @@ type InvoiceItem = {
   employeeName: string;
   employeeEmail: string;
   supplierName: string;
+  customerName: string;
   dateReceived: string;
   dateApproved: string;
   totalAmount: number;
@@ -77,6 +78,7 @@ type EmployeeDashboardProps = {
   }) => Promise<void>;
   onAddInvoice: (newInvoice: {
     supplierName: string;
+    customerName: string;
     dateReceived: string;
     dateApproved: string;
     totalAmount: number;
@@ -87,6 +89,7 @@ type EmployeeDashboardProps = {
     invoiceId: string,
     payload: {
       supplierName: string;
+      customerName: string;
       dateReceived: string;
       dateApproved: string;
       totalAmount: number;
@@ -273,6 +276,9 @@ function InvoiceCard({
             <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: `${accentColor}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14 }}>🧾</div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.supplierName}</div>
+              {item.customerName && (
+                <div style={{ fontSize: 11, color: theme.subtleText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Customer: {item.customerName}</div>
+              )}
             </div>
             <span style={getInvoiceBadgeStyle(item.status)}>{item.status}</span>
           </div>
@@ -289,6 +295,9 @@ function InvoiceCard({
           <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: `${accentColor}22`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🧾</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: 14, color: theme.title, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.supplierName}</div>
+            {item.customerName && (
+              <div style={{ fontSize: 11, color: theme.subtleText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Customer: {item.customerName}</div>
+            )}
             <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
               Received: {item.dateReceived || "—"}{item.dateApproved ? ` · Approved: ${item.dateApproved}` : ""}
             </div>
@@ -461,6 +470,7 @@ export default function EmployeeDashboard({
 
   const [invoiceForm, setInvoiceForm] = useState({
     supplierName: "",
+    customerName: "",
     dateReceived: getTodayDateString(),
     dateApproved: "",
     totalAmount: "",
@@ -525,6 +535,7 @@ export default function EmployeeDashboard({
   const resetInvoiceForm = () => {
     setInvoiceForm({
       supplierName: "",
+      customerName: "",
       dateReceived: getTodayDateString(),
       dateApproved: "",
       totalAmount: "",
@@ -538,6 +549,7 @@ export default function EmployeeDashboard({
     setEditingInvoice(item);
     setInvoiceForm({
       supplierName: item.supplierName || "",
+      customerName: item.customerName || "",
       dateReceived: item.dateReceived || getTodayDateString(),
       dateApproved: item.dateApproved || "",
       totalAmount: String(item.totalAmount ?? ""),
@@ -600,6 +612,7 @@ export default function EmployeeDashboard({
       if (editingInvoice) {
         await onUpdateInvoice(editingInvoice.id, {
           supplierName: invoiceForm.supplierName,
+          customerName: invoiceForm.customerName,
           dateReceived: invoiceForm.dateReceived,
           dateApproved: invoiceForm.dateApproved,
           totalAmount: parsedAmount,
@@ -614,6 +627,7 @@ export default function EmployeeDashboard({
       } else {
         await onAddInvoice({
           supplierName: invoiceForm.supplierName,
+          customerName: invoiceForm.customerName,
           dateReceived: invoiceForm.dateReceived,
           dateApproved: invoiceForm.dateApproved,
           totalAmount: parsedAmount,
@@ -2160,6 +2174,16 @@ export default function EmployeeDashboard({
                       value={invoiceForm.supplierName}
                       onChange={(e) => setInvoiceForm((prev) => ({ ...prev, supplierName: e.target.value }))}
                       placeholder="Enter supplier name"
+                    />
+                  </div>
+
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Customer Name</label>
+                    <input
+                      style={inputStyle()}
+                      value={invoiceForm.customerName}
+                      onChange={(e) => setInvoiceForm((prev) => ({ ...prev, customerName: e.target.value }))}
+                      placeholder="Enter customer name"
                     />
                   </div>
 

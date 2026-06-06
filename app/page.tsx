@@ -76,6 +76,7 @@ type InvoiceItem = {
   employeeName: string;
   employeeEmail: string;
   supplierName: string;
+  customerName: string;
   dateReceived: string;
   dateApproved: string;
   totalAmount: number;
@@ -975,6 +976,7 @@ export default function HomePage() {
             employeeName: data.employeeName ?? "",
             employeeEmail: data.employeeEmail ?? "",
             supplierName: data.supplierName ?? "",
+            customerName: data.customerName ?? "",
             dateReceived: data.dateReceived ?? "",
             dateApproved: data.dateApproved ?? "",
             totalAmount:
@@ -1110,6 +1112,7 @@ export default function HomePage() {
 
   const addInvoice = async (newInvoice: {
     supplierName: string;
+    customerName: string;
     dateReceived: string;
     dateApproved: string;
     totalAmount: number;
@@ -1147,6 +1150,7 @@ export default function HomePage() {
       employeeName: currentUser.name,
       employeeEmail: currentUser.email,
       supplierName: newInvoice.supplierName,
+      customerName: newInvoice.customerName,
       dateReceived: newInvoice.dateReceived,
       dateApproved: newInvoice.dateApproved,
       totalAmount: newInvoice.totalAmount,
@@ -1165,6 +1169,7 @@ export default function HomePage() {
     invoiceId: string,
     payload: {
       supplierName: string;
+      customerName: string;
       dateReceived: string;
       dateApproved: string;
       totalAmount: number;
@@ -1203,6 +1208,7 @@ export default function HomePage() {
 
     await updateDoc(refDoc, {
       supplierName: payload.supplierName,
+      customerName: payload.customerName,
       dateReceived: payload.dateReceived,
       dateApproved: payload.dateApproved,
       totalAmount: payload.totalAmount,
