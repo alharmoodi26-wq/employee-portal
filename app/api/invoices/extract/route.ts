@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
     console.log(`[extract] start: mime=${mime} size=${file.size}`);
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
         temperature: 0.1,
@@ -153,8 +153,36 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, ...safe });
   } catch (error) {
-    console.error("Gemini extract error:", error);
-    const message = error instanceof Error ? error.message : "Extraction failed.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // Detect quota / rate-limit errors and return a short stable code instead of
+    // Google's verbose multi-line message.
+    const raw = error instanceof Error ? error.message : String(error);
+    const status = extractStatusCode(error);
+    const isQuota =
+      status === 429 ||
+      /quota|rate.?limit|resource_exhausted|exceeded/i.test(raw);
+
+    if (isQuota) {
+      console.error("[extract] quota exceeded:", raw);
+      return NextResponse.json(
+        { error: "quota_exceeded", code: "quota_exceeded" },
+        { status: 429 }
+      );
+    }
+
+    console.error("[extract] error:", raw);
+    return NextResponse.json(
+      { error: "extraction_failed", code: "extraction_failed" },
+      { status: 500 }
+    );
   }
+}
+
+function extractStatusCode(err: unknown): number | null {
+  if (!err || typeof err !== "object") return null;
+  const e = err as Record<string, unknown>;
+  if (typeof e.status === "number") return e.status;
+  if (typeof e.statusCode === "number") return e.statusCode;
+  const msg = typeof e.message === "string" ? e.message : "";
+  const match = msg.match(/\b(4\d\d|5\d\d)\b/);
+  return match ? Number(match[1]) : null;
 }

@@ -484,6 +484,7 @@ export default function EmployeeDashboard({
 
   const handleScanInvoice = async (file: File) => {
     if (!file) return;
+    if (scanLoading) return; // prevent concurrent scans
     setScanLoading(true);
     setScanConfidence(null);
     try {
@@ -504,15 +505,24 @@ export default function EmployeeDashboard({
       try {
         data = await res.json();
       } catch {
-        throw new Error(`Server returned non-JSON (HTTP ${res.status}).`);
+        throw new Error("Scan failed. Please try again.");
       }
       console.log("[scan] response", res.status, data);
 
       if (!res.ok) {
+        const code = typeof data?.code === "string" ? data.code : "";
+        if (res.status === 429 || code === "quota_exceeded") {
+          throw new Error(
+            "تعذر قراءة الفاتورة حاليًا بسبب حد استخدام Gemini API. يرجى المحاولة بعد دقيقة أو التواصل مع المسؤول."
+          );
+        }
+        if (code === "extraction_failed") {
+          throw new Error("Scan failed. Please try a clearer image or enter manually.");
+        }
         throw new Error(
-          typeof data?.error === "string"
+          typeof data?.error === "string" && data.error.length < 200
             ? data.error
-            : `Scan failed (HTTP ${res.status}).`
+            : "Scan failed. Please try again."
         );
       }
 
