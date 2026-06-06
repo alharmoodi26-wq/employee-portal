@@ -1461,7 +1461,15 @@ export default function HomePage() {
           showToast("success", "Invoice deleted successfully.");
         } catch (error) {
           console.error(error);
-          showToast("error", "Error deleting invoice.");
+          const msg = error instanceof Error ? error.message : "";
+          if (/permission|insufficient|denied/i.test(msg)) {
+            showToast(
+              "error",
+              "You don't have permission to delete this invoice. Contact the admin."
+            );
+          } else {
+            showToast("error", msg || "Error deleting invoice.");
+          }
         }
       },
     });
