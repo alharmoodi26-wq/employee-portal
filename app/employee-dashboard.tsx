@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { auth } from "./lib/firebase";
 import {
   AssignedTask,
   AttendanceCard,
@@ -477,6 +478,61 @@ export default function EmployeeDashboard({
     status: "Approved" as InvoiceStatus,
   });
 
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanConfidence, setScanConfidence] = useState<Record<string, number> | null>(null);
+  const scanInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleScanInvoice = async (file: File) => {
+    if (!file) return;
+    setScanLoading(true);
+    setScanConfidence(null);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        showToast("error", "Please sign in again.");
+        return;
+      }
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/invoices/extract", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` },
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Scan failed.");
+      }
+
+      setInvoiceForm((prev) => ({
+        ...prev,
+        supplierName: data.supplier_name || prev.supplierName,
+        customerName: data.customer_name || prev.customerName,
+        totalAmount:
+          typeof data.total_amount === "number" ? String(data.total_amount) : prev.totalAmount,
+        dateReceived:
+          typeof data.invoice_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.invoice_date)
+            ? data.invoice_date
+            : prev.dateReceived,
+      }));
+      setScanConfidence(data.confidence || null);
+      setSelectedInvoiceFile(file);
+
+      const warnings: string[] = Array.isArray(data.warnings) ? data.warnings : [];
+      if (warnings.length > 0) {
+        showToast("error", warnings[0]);
+      } else {
+        showToast("success", "Invoice fields filled. Please review before saving.");
+      }
+    } catch (error) {
+      console.error(error);
+      showToast("error", error instanceof Error ? error.message : "Scan failed.");
+    } finally {
+      setScanLoading(false);
+      if (scanInputRef.current) scanInputRef.current.value = "";
+    }
+  };
+
   const tabScrollAreaStyle: React.CSSProperties = {
     maxHeight: "calc(100vh - 260px)",
     overflowY: "auto",
@@ -543,6 +599,7 @@ export default function EmployeeDashboard({
     });
     setSelectedInvoiceFile(null);
     setEditingInvoice(null);
+    setScanConfidence(null);
   };
 
   const openEditInvoice = (item: InvoiceItem) => {
@@ -2166,9 +2223,47 @@ export default function EmployeeDashboard({
 
               {/* Form body */}
               <div style={{ padding: "20px 24px" }}>
+                {!editingInvoice && (
+                  <div style={{
+                    marginBottom: 14, padding: "12px 14px", borderRadius: 12,
+                    background: "linear-gradient(135deg, rgba(59,130,246,0.08), rgba(99,102,241,0.08))",
+                    border: `1px dashed ${theme.cardBorder}`,
+                    display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                  }}>
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: theme.title }}>📷 Scan Invoice with AI</div>
+                      <div style={{ fontSize: 11, color: theme.subtleText, marginTop: 2 }}>
+                        Upload a photo or PDF — fields will be filled automatically. Review before saving.
+                      </div>
+                    </div>
+                    <input
+                      ref={scanInputRef}
+                      type="file"
+                      accept="image/*,application/pdf"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) handleScanInvoice(f);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={scanLoading}
+                      style={{ ...buttonStyle(true), opacity: scanLoading ? 0.6 : 1, whiteSpace: "nowrap" }}
+                      onClick={() => scanInputRef.current?.click()}
+                    >
+                      {scanLoading ? "Scanning…" : "📷 Scan Invoice"}
+                    </button>
+                  </div>
+                )}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                   <div style={{ gridColumn: "1 / -1" }}>
-                    <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Supplier Name</label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Supplier Name
+                      {scanConfidence && typeof scanConfidence.supplier_name === "number" && scanConfidence.supplier_name < 0.85 && (
+                        <span style={{ fontSize: 10, fontWeight: 800, color: "#92400e", background: "#fef3c7", padding: "2px 6px", borderRadius: 999 }}>⚠ Review</span>
+                      )}
+                    </label>
                     <input
                       style={inputStyle()}
                       value={invoiceForm.supplierName}
@@ -2178,7 +2273,12 @@ export default function EmployeeDashboard({
                   </div>
 
                   <div style={{ gridColumn: "1 / -1" }}>
-                    <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Customer Name</label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Customer Name
+                      {scanConfidence && typeof scanConfidence.customer_name === "number" && scanConfidence.customer_name < 0.85 && (
+                        <span style={{ fontSize: 10, fontWeight: 800, color: "#92400e", background: "#fef3c7", padding: "2px 6px", borderRadius: 999 }}>⚠ Review</span>
+                      )}
+                    </label>
                     <input
                       style={inputStyle()}
                       value={invoiceForm.customerName}
@@ -2188,7 +2288,12 @@ export default function EmployeeDashboard({
                   </div>
 
                   <div>
-                    <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Total Amount (AED)</label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Total Amount (AED)
+                      {scanConfidence && typeof scanConfidence.total_amount === "number" && scanConfidence.total_amount < 0.85 && (
+                        <span style={{ fontSize: 10, fontWeight: 800, color: "#92400e", background: "#fef3c7", padding: "2px 6px", borderRadius: 999 }}>⚠ Review</span>
+                      )}
+                    </label>
                     <input
                       type="number" min="0" step="0.01"
                       style={inputStyle()}
