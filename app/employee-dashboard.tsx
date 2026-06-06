@@ -505,25 +505,33 @@ export default function EmployeeDashboard({
       try {
         data = await res.json();
       } catch {
-        throw new Error("Scan failed. Please try again.");
+        throw new Error("حدث خطأ أثناء قراءة الفاتورة. يرجى المحاولة مرة أخرى.");
       }
       console.log("[scan] response", res.status, data);
 
       if (!res.ok) {
         const code = typeof data?.code === "string" ? data.code : "";
+
         if (res.status === 429 || code === "quota_exceeded") {
           throw new Error(
-            "تعذر قراءة الفاتورة حاليًا بسبب حد استخدام Gemini API. يرجى المحاولة بعد دقيقة أو التواصل مع المسؤول."
+            "تم الوصول إلى حد استخدام Gemini مؤقتًا. يرجى المحاولة بعد دقيقة."
           );
         }
-        if (code === "extraction_failed") {
-          throw new Error("Scan failed. Please try a clearer image or enter manually.");
+        if (code === "file_invalid") {
+          throw new Error(
+            "نوع الملف أو حجمه غير مدعوم. يرجى رفع صورة JPG/PNG أو PDF بحجم مناسب."
+          );
         }
-        throw new Error(
-          typeof data?.error === "string" && data.error.length < 200
-            ? data.error
-            : "Scan failed. Please try again."
-        );
+        if (res.status === 401 || code === "unauthorized") {
+          throw new Error("Please sign in again.");
+        }
+        if (code === "server_misconfigured") {
+          throw new Error(
+            "حدث خطأ أثناء قراءة الفاتورة. يرجى المحاولة مرة أخرى."
+          );
+        }
+        // Any other 500 / extraction_failed
+        throw new Error("حدث خطأ أثناء قراءة الفاتورة. يرجى المحاولة مرة أخرى.");
       }
 
       const supplierName = typeof data.supplier_name === "string" ? data.supplier_name : "";

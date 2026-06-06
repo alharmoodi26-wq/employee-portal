@@ -5,6 +5,7 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
+const MODEL_NAME = "gemini-2.5-flash";
 
 type ExtractedFields = {
   supplier_name: string | null;
@@ -81,82 +82,92 @@ Return ONLY valid JSON in this exact shape (no markdown, no commentary):
 }`;
 
 export async function POST(req: NextRequest) {
+  const reqId = Math.random().toString(36).slice(2, 8);
+  console.log(`[extract:${reqId}] start`);
+
   const authHeader = req.headers.get("authorization") || "";
   if (!authHeader.toLowerCase().startsWith("bearer ")) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    console.warn(`[extract:${reqId}] unauthorized: missing bearer token`);
+    return NextResponse.json({ code: "unauthorized" }, { status: 401 });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
+  console.log(`[extract:${reqId}] GEMINI_API_KEY present=${Boolean(apiKey)} model=${MODEL_NAME}`);
   if (!apiKey) {
-    return NextResponse.json(
-      { error: "Server not configured: GEMINI_API_KEY is missing." },
-      { status: 500 }
-    );
+    return NextResponse.json({ code: "server_misconfigured" }, { status: 500 });
   }
 
   let formData: FormData;
   try {
     formData = await req.formData();
-  } catch {
-    return NextResponse.json({ error: "Invalid form data." }, { status: 400 });
+  } catch (err) {
+    console.error(`[extract:${reqId}] formData parse failed:`, err);
+    return NextResponse.json({ code: "file_invalid" }, { status: 400 });
   }
 
   const file = formData.get("file");
   if (!(file instanceof Blob)) {
-    return NextResponse.json({ error: "Missing 'file' field." }, { status: 400 });
+    console.warn(`[extract:${reqId}] missing file field`);
+    return NextResponse.json({ code: "file_invalid" }, { status: 400 });
   }
 
-  if (file.size === 0) {
-    return NextResponse.json({ error: "File is empty." }, { status: 400 });
-  }
-  if (file.size > MAX_SIZE) {
-    return NextResponse.json(
-      { error: `File too large (max ${MAX_SIZE / 1024 / 1024} MB).` },
-      { status: 400 }
-    );
-  }
+  const fileName = (file as File).name || "(no name)";
+  const fileSize = file.size;
+  const fileType = (file.type || "").toLowerCase();
+  console.log(`[extract:${reqId}] file: name="${fileName}" size=${fileSize} type="${fileType}"`);
 
-  const mime = (file.type || "").toLowerCase();
-  if (!mime.startsWith("image/") && mime !== "application/pdf") {
-    return NextResponse.json(
-      { error: "Only images and PDF files are supported." },
-      { status: 400 }
-    );
+  if (fileSize === 0) {
+    console.warn(`[extract:${reqId}] empty file`);
+    return NextResponse.json({ code: "file_invalid" }, { status: 400 });
+  }
+  if (fileSize > MAX_SIZE) {
+    console.warn(`[extract:${reqId}] file too large: ${fileSize} bytes (max ${MAX_SIZE})`);
+    return NextResponse.json({ code: "file_invalid" }, { status: 400 });
+  }
+  if (!fileType.startsWith("image/") && fileType !== "application/pdf") {
+    console.warn(`[extract:${reqId}] unsupported file type: ${fileType}`);
+    return NextResponse.json({ code: "file_invalid" }, { status: 400 });
   }
 
   const buf = Buffer.from(await file.arrayBuffer());
   const base64 = buf.toString("base64");
 
   try {
-    console.log(`[extract] start: mime=${mime} size=${file.size}`);
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
+      model: MODEL_NAME,
       generationConfig: {
         responseMimeType: "application/json",
         temperature: 0.1,
       },
     });
 
+    console.log(`[extract:${reqId}] calling Gemini model=${MODEL_NAME}`);
+    const t0 = Date.now();
     const result = await model.generateContent([
-      { inlineData: { mimeType: mime, data: base64 } },
+      { inlineData: { mimeType: fileType, data: base64 } },
       { text: PROMPT },
     ]);
+    const elapsedMs = Date.now() - t0;
 
     const text = result.response.text();
-    console.log(`[extract] raw response length=${text?.length ?? 0}`);
+    console.log(
+      `[extract:${reqId}] Gemini OK elapsed=${elapsedMs}ms responseLen=${text?.length ?? 0}`
+    );
+
     let parsed: ExtractedFields;
     try {
       parsed = JSON.parse(text);
     } catch (jsonErr) {
-      console.error("[extract] JSON parse failed:", jsonErr, "raw:", text?.slice(0, 500));
-      return NextResponse.json(
-        { error: "AI returned invalid JSON. Try a clearer image." },
-        { status: 502 }
+      console.error(
+        `[extract:${reqId}] JSON parse failed:`,
+        jsonErr,
+        "raw head:",
+        text?.slice(0, 500)
       );
+      return NextResponse.json({ code: "extraction_failed" }, { status: 500 });
     }
 
-    // Basic shape sanity — fill in safe defaults
     const safe: ExtractedFields = {
       supplier_name: typeof parsed.supplier_name === "string" ? parsed.supplier_name : null,
       customer_name: typeof parsed.customer_name === "string" ? parsed.customer_name : null,
@@ -167,10 +178,11 @@ export async function POST(req: NextRequest) {
       currency: typeof parsed.currency === "string" ? parsed.currency : null,
       trn_or_vat_number: typeof parsed.trn_or_vat_number === "string" ? parsed.trn_or_vat_number : null,
       confidence: parsed.confidence && typeof parsed.confidence === "object" ? parsed.confidence : {},
-      warnings: Array.isArray(parsed.warnings) ? parsed.warnings.filter((w) => typeof w === "string") : [],
+      warnings: Array.isArray(parsed.warnings)
+        ? parsed.warnings.filter((w) => typeof w === "string")
+        : [],
     };
 
-    // Light validation hints
     if (safe.invoice_date && !/^\d{4}-\d{2}-\d{2}$/.test(safe.invoice_date)) {
       safe.warnings.push("Invoice date is not in YYYY-MM-DD format — please review.");
     }
@@ -183,27 +195,18 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, ...safe });
   } catch (error) {
-    // Detect quota / rate-limit errors and return a short stable code instead of
-    // Google's verbose multi-line message.
     const raw = error instanceof Error ? error.message : String(error);
     const status = extractStatusCode(error);
     const isQuota =
-      status === 429 ||
-      /quota|rate.?limit|resource_exhausted|exceeded/i.test(raw);
+      status === 429 || /quota|rate.?limit|resource_exhausted|exceeded/i.test(raw);
 
     if (isQuota) {
-      console.error("[extract] quota exceeded:", raw);
-      return NextResponse.json(
-        { error: "quota_exceeded", code: "quota_exceeded" },
-        { status: 429 }
-      );
+      console.error(`[extract:${reqId}] Gemini quota/rate limit. status=${status} msg=${raw}`);
+      return NextResponse.json({ code: "quota_exceeded" }, { status: 429 });
     }
 
-    console.error("[extract] error:", raw);
-    return NextResponse.json(
-      { error: "extraction_failed", code: "extraction_failed" },
-      { status: 500 }
-    );
+    console.error(`[extract:${reqId}] Gemini error. status=${status} msg=${raw}`);
+    return NextResponse.json({ code: "extraction_failed" }, { status: 500 });
   }
 }
 
