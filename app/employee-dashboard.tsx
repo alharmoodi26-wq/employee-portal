@@ -499,33 +499,82 @@ export default function EmployeeDashboard({
         headers: { Authorization: `Bearer ${idToken}` },
         body: fd,
       });
-      const data = await res.json();
+
+      let data: Record<string, unknown> = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(`Server returned non-JSON (HTTP ${res.status}).`);
+      }
+      console.log("[scan] response", res.status, data);
+
       if (!res.ok) {
-        throw new Error(data?.error || "Scan failed.");
+        throw new Error(
+          typeof data?.error === "string"
+            ? data.error
+            : `Scan failed (HTTP ${res.status}).`
+        );
+      }
+
+      const supplierName = typeof data.supplier_name === "string" ? data.supplier_name : "";
+      const customerName = typeof data.customer_name === "string" ? data.customer_name : "";
+      const totalAmount = typeof data.total_amount === "number" ? data.total_amount : null;
+      const invoiceDate =
+        typeof data.invoice_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.invoice_date)
+          ? data.invoice_date
+          : "";
+
+      const filledCount =
+        (supplierName ? 1 : 0) +
+        (customerName ? 1 : 0) +
+        (totalAmount !== null ? 1 : 0) +
+        (invoiceDate ? 1 : 0);
+
+      if (filledCount === 0) {
+        showToast(
+          "error",
+          "Could not read any data from the invoice. Try a clearer photo or enter the fields manually."
+        );
+        setSelectedInvoiceFile(file);
+        return;
       }
 
       setInvoiceForm((prev) => ({
         ...prev,
-        supplierName: data.supplier_name || prev.supplierName,
-        customerName: data.customer_name || prev.customerName,
-        totalAmount:
-          typeof data.total_amount === "number" ? String(data.total_amount) : prev.totalAmount,
-        dateReceived:
-          typeof data.invoice_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.invoice_date)
-            ? data.invoice_date
-            : prev.dateReceived,
+        supplierName: supplierName || prev.supplierName,
+        customerName: customerName || prev.customerName,
+        totalAmount: totalAmount !== null ? String(totalAmount) : prev.totalAmount,
+        dateReceived: invoiceDate || prev.dateReceived,
       }));
-      setScanConfidence(data.confidence || null);
+      setScanConfidence(
+        data.confidence && typeof data.confidence === "object"
+          ? (data.confidence as Record<string, number>)
+          : null
+      );
       setSelectedInvoiceFile(file);
 
-      const warnings: string[] = Array.isArray(data.warnings) ? data.warnings : [];
+      const warnings: string[] = Array.isArray(data.warnings)
+        ? (data.warnings as unknown[]).filter((w): w is string => typeof w === "string")
+        : [];
+      const summary = [
+        supplierName && `Supplier: ${supplierName}`,
+        totalAmount !== null && `Total: ${totalAmount}`,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
       if (warnings.length > 0) {
         showToast("error", warnings[0]);
       } else {
-        showToast("success", "Invoice fields filled. Please review before saving.");
+        showToast(
+          "success",
+          summary
+            ? `Read ${filledCount} field${filledCount === 1 ? "" : "s"}. ${summary}`
+            : `Read ${filledCount} field${filledCount === 1 ? "" : "s"}. Please review.`
+        );
       }
     } catch (error) {
-      console.error(error);
+      console.error("[scan] error", error);
       showToast("error", error instanceof Error ? error.message : "Scan failed.");
     } finally {
       setScanLoading(false);

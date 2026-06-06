@@ -102,6 +102,7 @@ export async function POST(req: NextRequest) {
   const base64 = buf.toString("base64");
 
   try {
+    console.log(`[extract] start: mime=${mime} size=${file.size}`);
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
       model: "gemini-2.0-flash",
@@ -117,10 +118,12 @@ export async function POST(req: NextRequest) {
     ]);
 
     const text = result.response.text();
+    console.log(`[extract] raw response length=${text?.length ?? 0}`);
     let parsed: ExtractedFields;
     try {
       parsed = JSON.parse(text);
-    } catch {
+    } catch (jsonErr) {
+      console.error("[extract] JSON parse failed:", jsonErr, "raw:", text?.slice(0, 500));
       return NextResponse.json(
         { error: "AI returned invalid JSON. Try a clearer image." },
         { status: 502 }
