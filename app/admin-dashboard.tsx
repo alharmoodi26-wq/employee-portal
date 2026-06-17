@@ -3,6 +3,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import {
+  Assessment,
+  AssessmentSubmission,
   AssignedTask,
   AttendanceCard,
   AttendanceRecord,
@@ -41,8 +43,9 @@ import {
   escHtml,
   safeUrl,
 } from "./portal-utils";
+import AdminAssessments, { AssessmentDraft } from "./admin-assessments";
 
-type DashboardTab = "dashboard" | "review" | "employees" | "hr" | "invoices";
+type DashboardTab = "dashboard" | "review" | "employees" | "hr" | "invoices" | "assessments";
 type HRSubTab = "attendance" | "ohc" | "birthdays";
 type ReviewFilter = "pending" | "active" | "approved";
 
@@ -195,6 +198,15 @@ type AdminDashboardProps = {
   onReturnForRevision: (id: string, note: string) => Promise<void>;
   onDeleteWork: (id: string) => Promise<void>;
   onDeleteTask: (id: string) => Promise<void>;
+  // Assessments
+  assessments?: Assessment[];
+  assessmentSubmissions?: AssessmentSubmission[];
+  loadingAssessments?: boolean;
+  loadingAssessmentSubmissions?: boolean;
+  onCreateAssessment?: (draft: AssessmentDraft) => Promise<{ id: string; code: string }>;
+  onUpdateAssessment?: (id: string, draft: AssessmentDraft) => Promise<void>;
+  onDeleteAssessment?: (id: string, title: string) => void;
+  onToggleAssessmentActive?: (id: string, nextActive: boolean) => Promise<void>;
   showToast: (type: ToastType, message: string) => void;
 };
 
@@ -833,6 +845,14 @@ export default function AdminDashboard({
   onReturnForRevision,
   onDeleteWork,
   onDeleteTask,
+  assessments = [],
+  assessmentSubmissions = [],
+  loadingAssessments = false,
+  loadingAssessmentSubmissions = false,
+  onCreateAssessment,
+  onUpdateAssessment,
+  onDeleteAssessment,
+  onToggleAssessmentActive,
   showToast,
 }: AdminDashboardProps) {
   const theme = getThemePalette();
@@ -1889,6 +1909,7 @@ export default function AdminDashboard({
     employees: "Employees",
     hr: "HR",
     invoices: "Invoices",
+    assessments: "Assessments",
   };
 
   return (
@@ -2193,11 +2214,12 @@ export default function AdminDashboard({
         <nav style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3 }}>
           {(
             [
-              { id: "dashboard", icon: "📊", label: "Dashboard", badge: 0 },
-              { id: "review",    icon: "📋", label: "Review",    badge: pendingCount },
-              { id: "employees", icon: "👥", label: "Employees", badge: 0 },
-              { id: "hr",        icon: "🏢", label: "HR",        badge: pendingAttendanceCount },
-              { id: "invoices",  icon: "💰", label: "Invoices",  badge: invoiceReviewItems.length },
+              { id: "dashboard",   icon: "📊", label: "Dashboard",   badge: 0 },
+              { id: "review",      icon: "📋", label: "Review",      badge: pendingCount },
+              { id: "employees",   icon: "👥", label: "Employees",   badge: 0 },
+              { id: "hr",          icon: "🏢", label: "HR",          badge: pendingAttendanceCount },
+              { id: "invoices",    icon: "💰", label: "Invoices",    badge: invoiceReviewItems.length },
+              { id: "assessments", icon: "📝", label: "Assessments", badge: 0 },
             ] as { id: DashboardTab; icon: string; label: string; badge: number }[]
           ).map(({ id, icon, label, badge }) => (
             <button
@@ -4009,6 +4031,40 @@ export default function AdminDashboard({
           </div>
         )}
 
+        {activeTab === "assessments" && (
+          <AdminAssessments
+            assessments={assessments}
+            submissions={assessmentSubmissions}
+            loadingAssessments={loadingAssessments}
+            loadingSubmissions={loadingAssessmentSubmissions}
+            onCreateAssessment={async (draft) => {
+              if (!onCreateAssessment) {
+                throw new Error("Assessment creation is not wired up.");
+              }
+              return onCreateAssessment(draft);
+            }}
+            onUpdateAssessment={async (id, draft) => {
+              if (!onUpdateAssessment) {
+                throw new Error("Assessment update is not wired up.");
+              }
+              return onUpdateAssessment(id, draft);
+            }}
+            onDeleteAssessment={(id, title) => {
+              if (!onDeleteAssessment) {
+                showToast("error", "Assessment deletion is not wired up.");
+                return;
+              }
+              onDeleteAssessment(id, title);
+            }}
+            onToggleAssessmentActive={async (id, nextActive) => {
+              if (!onToggleAssessmentActive) {
+                throw new Error("Assessment status update is not wired up.");
+              }
+              return onToggleAssessmentActive(id, nextActive);
+            }}
+            showToast={showToast}
+          />
+        )}
 
         {invoiceFormOpen && (
           <div style={{
@@ -4486,11 +4542,12 @@ export default function AdminDashboard({
         activeTab={activeTab}
         onTabChange={(id) => setActiveTab(id as DashboardTab)}
         tabs={[
-          { id: "dashboard",  label: "Home",      icon: "📊" },
-          { id: "review",     label: "Review",    icon: "🔍", badge: pendingCount },
-          { id: "employees",  label: "Employees", icon: "👥" },
-          { id: "hr",         label: "HR",        icon: "⚕️" },
-          { id: "invoices",   label: "Invoices",  icon: "💰" },
+          { id: "dashboard",   label: "Home",        icon: "📊" },
+          { id: "review",      label: "Review",      icon: "🔍", badge: pendingCount },
+          { id: "employees",   label: "Employees",   icon: "👥" },
+          { id: "hr",          label: "HR",          icon: "⚕️" },
+          { id: "invoices",    label: "Invoices",    icon: "💰" },
+          { id: "assessments", label: "Assessments", icon: "📝" },
         ]}
       />
     </div>

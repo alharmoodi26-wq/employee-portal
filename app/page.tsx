@@ -27,7 +27,11 @@ import { getDownloadURL, ref } from "firebase/storage";
 
 import EmployeeDashboard from "./employee-dashboard";
 import AdminDashboard from "./admin-dashboard";
+import { AssessmentDraft } from "./admin-assessments";
 import {
+  Assessment,
+  AssessmentSubmission,
+  AssessmentSubmissionStatus,
   AssignedTask,
   AttendanceRecord,
   ConfirmModal,
@@ -495,6 +499,10 @@ export default function HomePage() {
   const [birthdays, setBirthdays] = useState<BirthdayEntry[]>([]);
   const [ohcCertifications, setOhcCertifications] = useState<OHCCertificationEntry[]>([]);
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [assessmentSubmissions, setAssessmentSubmissions] = useState<AssessmentSubmission[]>([]);
+  const [loadingAssessments, setLoadingAssessments] = useState(true);
+  const [loadingAssessmentSubmissions, setLoadingAssessmentSubmissions] = useState(true);
   const [currentUser, setCurrentUser] = useState<Employee | null>(null);
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -597,6 +605,8 @@ export default function HomePage() {
           setBirthdays([]);
           setOhcCertifications([]);
           setInvoices([]);
+          setAssessments([]);
+          setAssessmentSubmissions([]);
         }
       } catch (error) {
         console.error("Error loading current user:", error);
@@ -1030,6 +1040,126 @@ export default function HomePage() {
     return () => unsubscribe();
   }, [currentUser, invoicesLimit]);
 
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== "admin") {
+      setAssessments([]);
+      setLoadingAssessments(false);
+      return;
+    }
+
+    setLoadingAssessments(true);
+
+    const unsubscribe = onSnapshot(
+      query(collection(db, "assessments"), orderBy("createdAt", "desc")),
+      (snapshot) => {
+        const items: Assessment[] = snapshot.docs.map((document) => {
+          const data = document.data();
+          const rawQuestions = Array.isArray(data.questions) ? data.questions : [];
+          const questions = rawQuestions.map((raw: unknown, i: number) => {
+            const q = (raw ?? {}) as Record<string, unknown>;
+            return {
+              id: typeof q.id === "string" ? q.id : `q_${i}`,
+              text: typeof q.text === "string" ? q.text : "",
+              options: Array.isArray(q.options)
+                ? (q.options as unknown[]).map((o) => (typeof o === "string" ? o : ""))
+                : [],
+              correctAnswerIndex:
+                typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0,
+            };
+          });
+          const createdAtVal = data.createdAt;
+          const createdAtIso =
+            createdAtVal && typeof createdAtVal === "object" && "toDate" in createdAtVal
+              ? (createdAtVal as { toDate: () => Date }).toDate().toISOString()
+              : typeof createdAtVal === "string"
+              ? createdAtVal
+              : "";
+          return {
+            id: document.id,
+            title: typeof data.title === "string" ? data.title : "",
+            description: typeof data.description === "string" ? data.description : "",
+            passingPercentage:
+              typeof data.passingPercentage === "number" ? data.passingPercentage : 70,
+            maxAttempts: typeof data.maxAttempts === "number" ? data.maxAttempts : 2,
+            code: typeof data.code === "string" ? data.code : "",
+            questions,
+            createdAt: createdAtIso,
+            createdBy: typeof data.createdBy === "string" ? data.createdBy : "",
+            createdByName: typeof data.createdByName === "string" ? data.createdByName : "",
+            isActive: data.isActive !== false,
+          } as Assessment;
+        });
+        setAssessments(items);
+        setLoadingAssessments(false);
+      },
+      (error) => {
+        console.error("Error loading assessments:", error);
+        setLoadingAssessments(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== "admin") {
+      setAssessmentSubmissions([]);
+      setLoadingAssessmentSubmissions(false);
+      return;
+    }
+
+    setLoadingAssessmentSubmissions(true);
+
+    const unsubscribe = onSnapshot(
+      query(collection(db, "assessmentSubmissions"), orderBy("submittedAt", "desc")),
+      (snapshot) => {
+        const items: AssessmentSubmission[] = snapshot.docs.map((document) => {
+          const data = document.data();
+          const submittedAtVal = data.submittedAt;
+          const submittedAtIso =
+            submittedAtVal && typeof submittedAtVal === "object" && "toDate" in submittedAtVal
+              ? (submittedAtVal as { toDate: () => Date }).toDate().toISOString()
+              : typeof submittedAtVal === "string"
+              ? submittedAtVal
+              : "";
+          const status: AssessmentSubmissionStatus =
+            data.status === "Pass" ? "Pass" : "Fail";
+          return {
+            id: document.id,
+            assessmentId: typeof data.assessmentId === "string" ? data.assessmentId : "",
+            assessmentCode: typeof data.assessmentCode === "string" ? data.assessmentCode : "",
+            assessmentTitle: typeof data.assessmentTitle === "string" ? data.assessmentTitle : "",
+            participantName: typeof data.participantName === "string" ? data.participantName : "",
+            phoneNumber: typeof data.phoneNumber === "string" ? data.phoneNumber : "",
+            attemptNumber:
+              typeof data.attemptNumber === "number" ? data.attemptNumber : 1,
+            answers: Array.isArray(data.answers)
+              ? (data.answers as unknown[]).map((a) => (typeof a === "number" ? a : -1))
+              : [],
+            correctAnswers: Array.isArray(data.correctAnswers)
+              ? (data.correctAnswers as unknown[]).map((a) => (typeof a === "number" ? a : -1))
+              : [],
+            score: typeof data.score === "number" ? data.score : 0,
+            totalQuestions:
+              typeof data.totalQuestions === "number" ? data.totalQuestions : 0,
+            percentage:
+              typeof data.percentage === "number" ? data.percentage : 0,
+            status,
+            submittedAt: submittedAtIso,
+          };
+        });
+        setAssessmentSubmissions(items);
+        setLoadingAssessmentSubmissions(false);
+      },
+      (error) => {
+        console.error("Error loading assessment submissions:", error);
+        setLoadingAssessmentSubmissions(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
   const loadMoreWorks      = () => setWorksLimit((n) => n + 200);
   const loadMoreTasks      = () => setTasksLimit((n) => n + 200);
   const loadMoreAttendance = () => setAttendanceLimit((n) => n + 300);
@@ -1067,6 +1197,8 @@ export default function HomePage() {
       setBirthdays([]);
       setOhcCertifications([]);
       setInvoices([]);
+      setAssessments([]);
+      setAssessmentSubmissions([]);
       setLoginForm({ email: "", password: "" });
       setLoadingWorks(false);
       setLoadingTasks(false);
@@ -1861,6 +1993,100 @@ export default function HomePage() {
     });
   };
 
+  // ── Assessments CRUD ────────────────────────────────────────────────
+  const generateAssessmentCode = (): string => {
+    // 8 chars, [A-Z0-9], no ambiguous chars (I, O, 0, 1)
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let out = "";
+    for (let i = 0; i < 8; i++) {
+      out += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return out;
+  };
+
+  const createAssessment = async (draft: AssessmentDraft): Promise<{ id: string; code: string }> => {
+    if (!currentUser) throw new Error("Not signed in.");
+
+    // generate code with up to 5 retries to avoid extremely rare collisions
+    let code = "";
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = generateAssessmentCode();
+      const existing = await getDocs(
+        query(collection(db, "assessments"), where("code", "==", candidate), limit(1))
+      );
+      if (existing.empty) {
+        code = candidate;
+        break;
+      }
+    }
+    if (!code) throw new Error("Could not generate a unique code. Please try again.");
+
+    const sanitizedQuestions = draft.questions.map((q) => ({
+      id: q.id,
+      text: q.text.trim(),
+      options: q.options.map((o) => o.trim()),
+      correctAnswerIndex: q.correctAnswerIndex,
+    }));
+
+    const docRef = await addDoc(collection(db, "assessments"), {
+      title: draft.title.trim(),
+      description: draft.description.trim(),
+      passingPercentage: draft.passingPercentage,
+      maxAttempts: draft.maxAttempts,
+      code,
+      questions: sanitizedQuestions,
+      isActive: draft.isActive,
+      createdBy: currentUser.uid,
+      createdByName: currentUser.name,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    return { id: docRef.id, code };
+  };
+
+  const updateAssessment = async (id: string, draft: AssessmentDraft): Promise<void> => {
+    const sanitizedQuestions = draft.questions.map((q) => ({
+      id: q.id,
+      text: q.text.trim(),
+      options: q.options.map((o) => o.trim()),
+      correctAnswerIndex: q.correctAnswerIndex,
+    }));
+    await updateDoc(doc(db, "assessments", id), {
+      title: draft.title.trim(),
+      description: draft.description.trim(),
+      passingPercentage: draft.passingPercentage,
+      maxAttempts: draft.maxAttempts,
+      questions: sanitizedQuestions,
+      isActive: draft.isActive,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const toggleAssessmentActive = async (id: string, nextActive: boolean): Promise<void> => {
+    await updateDoc(doc(db, "assessments", id), {
+      isActive: nextActive,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const deleteAssessment = (id: string, title: string) => {
+    setConfirmState({
+      open: true,
+      title: "Delete assessment",
+      message: `Delete "${title}"? Any submissions will remain in Firestore for the audit trail.`,
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, "assessments", id));
+          showToast("success", "Assessment deleted.");
+        } catch (error) {
+          console.error(error);
+          showToast("error", "Could not delete the assessment.");
+        }
+      },
+    });
+  };
+
   if (!splashDone) {
     return (
       <div style={{
@@ -2018,6 +2244,14 @@ export default function HomePage() {
           onReturnForRevision={returnTaskForRevision}
           onDeleteWork={permanentDeleteWork}
           onDeleteTask={permanentDeleteTask}
+          assessments={assessments}
+          assessmentSubmissions={assessmentSubmissions}
+          loadingAssessments={loadingAssessments}
+          loadingAssessmentSubmissions={loadingAssessmentSubmissions}
+          onCreateAssessment={createAssessment}
+          onUpdateAssessment={updateAssessment}
+          onDeleteAssessment={deleteAssessment}
+          onToggleAssessmentActive={toggleAssessmentActive}
           showToast={showToast}
         />
       ) : (

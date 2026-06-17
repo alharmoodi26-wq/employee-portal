@@ -1,0 +1,1395 @@
+"use client";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Assessment,
+  AssessmentQuestion,
+  AssessmentSubmission,
+  buttonStyle,
+  cardStyle,
+  COMPANY_NAME,
+  dangerButtonStyle,
+  EmptyState,
+  escHtml,
+  getThemeMode,
+  getThemePalette,
+  inputStyle,
+  SectionTitle,
+  selectStyle,
+  smallButtonStyle,
+  SkeletonCard,
+  softCardStyle,
+  StatBox,
+  SYSTEM_NAME,
+  ToastType,
+} from "./portal-utils";
+
+export type AssessmentDraftQuestion = {
+  id: string;
+  text: string;
+  options: string[];
+  correctAnswerIndex: number;
+};
+
+export type AssessmentDraft = {
+  title: string;
+  description: string;
+  passingPercentage: number;
+  maxAttempts: number;
+  isActive: boolean;
+  questions: AssessmentDraftQuestion[];
+};
+
+export type AdminAssessmentsProps = {
+  assessments: Assessment[];
+  submissions: AssessmentSubmission[];
+  loadingAssessments: boolean;
+  loadingSubmissions: boolean;
+  onCreateAssessment: (
+    draft: AssessmentDraft
+  ) => Promise<{ id: string; code: string }>;
+  onUpdateAssessment: (id: string, draft: AssessmentDraft) => Promise<void>;
+  onDeleteAssessment: (id: string, title: string) => void;
+  onToggleAssessmentActive: (id: string, nextActive: boolean) => Promise<void>;
+  showToast: (type: ToastType, message: string) => void;
+};
+
+const emptyQuestion = (): AssessmentDraftQuestion => ({
+  id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+  text: "",
+  options: ["", ""],
+  correctAnswerIndex: 0,
+});
+
+const emptyDraft = (): AssessmentDraft => ({
+  title: "",
+  description: "",
+  passingPercentage: 70,
+  maxAttempts: 2,
+  isActive: true,
+  questions: [emptyQuestion()],
+});
+
+function publicAssessmentUrl(code: string): string {
+  if (typeof window === "undefined") return `/assessment/${code}`;
+  return `${window.location.origin}/assessment/${code}`;
+}
+
+function fmtDateTime(value: string): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export default function AdminAssessments({
+  assessments,
+  submissions,
+  loadingAssessments,
+  loadingSubmissions,
+  onCreateAssessment,
+  onUpdateAssessment,
+  onDeleteAssessment,
+  onToggleAssessmentActive,
+  showToast,
+}: AdminAssessmentsProps) {
+  const theme = getThemePalette();
+  const isDark = getThemeMode() === "dark";
+
+  type View =
+    | { type: "list" }
+    | { type: "results"; assessmentId: string }
+    | { type: "submission"; submissionId: string };
+
+  const [view, setView] = useState<View>({ type: "list" });
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<"create" | "edit">("create");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<AssessmentDraft>(emptyDraft());
+  const [saving, setSaving] = useState(false);
+  const [createdInfo, setCreatedInfo] = useState<{ code: string; url: string } | null>(null);
+  const [search, setSearch] = useState("");
+
+  const submissionsByAssessment = useMemo(() => {
+    const map = new Map<string, AssessmentSubmission[]>();
+    for (const s of submissions) {
+      const arr = map.get(s.assessmentId) || [];
+      arr.push(s);
+      map.set(s.assessmentId, arr);
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : -1));
+    }
+    return map;
+  }, [submissions]);
+
+  const handleStartCreate = () => {
+    setEditorMode("create");
+    setEditingId(null);
+    setDraft(emptyDraft());
+    setCreatedInfo(null);
+    setEditorOpen(true);
+  };
+
+  const handleStartEdit = (a: Assessment) => {
+    const hasSubs = (submissionsByAssessment.get(a.id) || []).length > 0;
+    if (hasSubs) {
+      showToast(
+        "error",
+        "This assessment already has submissions and cannot be edited."
+      );
+      return;
+    }
+    setEditorMode("edit");
+    setEditingId(a.id);
+    setDraft({
+      title: a.title,
+      description: a.description,
+      passingPercentage: a.passingPercentage,
+      maxAttempts: a.maxAttempts,
+      isActive: a.isActive,
+      questions: a.questions.map((q) => ({
+        id: q.id,
+        text: q.text,
+        options: [...q.options],
+        correctAnswerIndex: q.correctAnswerIndex,
+      })),
+    });
+    setCreatedInfo(null);
+    setEditorOpen(true);
+  };
+
+  const handleSave = async () => {
+    const validation = validateDraft(draft);
+    if (validation) {
+      showToast("error", validation);
+      return;
+    }
+
+    setSaving(true);
+    try {
+      if (editorMode === "create") {
+        const { code } = await onCreateAssessment(draft);
+        const url = publicAssessmentUrl(code);
+        setCreatedInfo({ code, url });
+        showToast("success", "Assessment created.");
+      } else if (editingId) {
+        await onUpdateAssessment(editingId, draft);
+        showToast("success", "Assessment updated.");
+        setEditorOpen(false);
+      }
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : "Error saving assessment.";
+      showToast("error", msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filteredAssessments = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return assessments;
+    return assessments.filter((a) =>
+      [a.title, a.description, a.code, a.createdByName]
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [assessments, search]);
+
+  // Stats
+  const totalAssessments = assessments.length;
+  const totalActive = assessments.filter((a) => a.isActive).length;
+  const totalSubmissions = submissions.length;
+  const totalPasses = submissions.filter((s) => s.status === "Pass").length;
+
+  if (view.type === "submission") {
+    const sub = submissions.find((s) => s.id === view.submissionId);
+    if (!sub) {
+      return (
+        <div style={cardStyle()}>
+          <div style={{ marginBottom: 12 }}>
+            <button style={smallButtonStyle()} onClick={() => setView({ type: "list" })}>
+              ← Back to Assessments
+            </button>
+          </div>
+          <EmptyState
+            title="Submission not found"
+            description="This submission may have been removed."
+          />
+        </div>
+      );
+    }
+    const assessment = assessments.find((a) => a.id === sub.assessmentId);
+    return (
+      <SubmissionDetail
+        submission={sub}
+        assessment={assessment}
+        onBack={() => setView({ type: "results", assessmentId: sub.assessmentId })}
+      />
+    );
+  }
+
+  if (view.type === "results") {
+    const assessment = assessments.find((a) => a.id === view.assessmentId);
+    const subs = (submissionsByAssessment.get(view.assessmentId) || []).slice();
+    return (
+      <AssessmentResults
+        assessment={assessment}
+        submissions={subs}
+        loading={loadingSubmissions}
+        onBack={() => setView({ type: "list" })}
+        onOpenSubmission={(id) => setView({ type: "submission", submissionId: id })}
+      />
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      {/* Top stats */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: 12,
+        }}
+      >
+        <StatBox title="Total Assessments" value={totalAssessments} hint={`${totalActive} active`} />
+        <StatBox title="Submissions" value={totalSubmissions} hint="across all assessments" />
+        <StatBox title="Pass rate" value={totalSubmissions === 0 ? "—" : `${Math.round((totalPasses / totalSubmissions) * 100)}%`} hint={`${totalPasses}/${totalSubmissions} passed`} />
+      </div>
+
+      {/* Toolbar */}
+      <div style={{ ...cardStyle(), padding: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <input
+            placeholder="Search by title, code, or creator…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ ...inputStyle(), maxWidth: 340 }}
+          />
+          <button style={buttonStyle(true)} onClick={handleStartCreate}>
+            ＋ New Assessment
+          </button>
+        </div>
+      </div>
+
+      {/* List */}
+      <div>
+        <SectionTitle>Assessments</SectionTitle>
+        {loadingAssessments ? (
+          <div style={{ display: "grid", gap: 12 }}>
+            <SkeletonCard rows={3} />
+            <SkeletonCard rows={3} />
+          </div>
+        ) : filteredAssessments.length === 0 ? (
+          <EmptyState
+            title="No assessments yet"
+            description="Create your first assessment to share a public link with employees or external participants."
+            icon="📝"
+            action={{ label: "Create assessment", onClick: handleStartCreate }}
+          />
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {filteredAssessments.map((a) => {
+              const subs = submissionsByAssessment.get(a.id) || [];
+              const passes = subs.filter((s) => s.status === "Pass").length;
+              const url = publicAssessmentUrl(a.code);
+              const avgPct =
+                subs.length === 0
+                  ? 0
+                  : Math.round(subs.reduce((sum, s) => sum + s.percentage, 0) / subs.length);
+              return (
+                <div key={a.id} style={softCardStyle()}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 14,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: theme.title }}>
+                          {a.title}
+                        </div>
+                        <span
+                          style={{
+                            padding: "3px 9px",
+                            borderRadius: 999,
+                            fontSize: 11,
+                            fontWeight: 800,
+                            background: a.isActive
+                              ? (isDark ? "rgba(16,185,129,0.14)" : "#dcfce7")
+                              : (isDark ? "rgba(100,116,139,0.14)" : "#f3f4f6"),
+                            color: a.isActive
+                              ? (isDark ? "#34d399" : "#166534")
+                              : (isDark ? "#94a3b8" : "#374151"),
+                            border: `1px solid ${a.isActive ? (isDark ? "rgba(16,185,129,0.3)" : "#86efac") : theme.cardBorder}`,
+                          }}
+                        >
+                          {a.isActive ? "Active" : "Disabled"}
+                        </span>
+                      </div>
+                      {a.description && (
+                        <div style={{ fontSize: 13, color: theme.subtleText, marginTop: 4, lineHeight: 1.6 }}>
+                          {a.description}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                        <span>📋 {a.questions.length} question{a.questions.length === 1 ? "" : "s"}</span>
+                        <span>🎯 Passing: {a.passingPercentage}%</span>
+                        <span>🔁 {a.maxAttempts} attempt{a.maxAttempts === 1 ? "" : "s"}</span>
+                        <span>👥 {subs.length} submission{subs.length === 1 ? "" : "s"}</span>
+                        {subs.length > 0 && (
+                          <span>
+                            ✅ {passes} pass · ❌ {subs.length - passes} fail · ⌀ {avgPct}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+                      <button
+                        style={smallButtonStyle()}
+                        onClick={() => setView({ type: "results", assessmentId: a.id })}
+                      >
+                        Results
+                      </button>
+                      <button
+                        style={smallButtonStyle()}
+                        onClick={() => handleStartEdit(a)}
+                        title={subs.length > 0 ? "Cannot edit after submissions exist" : "Edit"}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        style={smallButtonStyle()}
+                        onClick={async () => {
+                          try {
+                            await onToggleAssessmentActive(a.id, !a.isActive);
+                            showToast("success", a.isActive ? "Assessment disabled." : "Assessment enabled.");
+                          } catch (err) {
+                            console.error(err);
+                            showToast("error", "Could not update status.");
+                          }
+                        }}
+                      >
+                        {a.isActive ? "Disable" : "Enable"}
+                      </button>
+                      <button
+                        style={dangerButtonStyle()}
+                        onClick={() => onDeleteAssessment(a.id, a.title)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Link box */}
+                  <div
+                    style={{
+                      marginTop: 14,
+                      background: theme.fileCardBg,
+                      border: `1px solid ${theme.fileCardBorder}`,
+                      borderRadius: 12,
+                      padding: 12,
+                      display: "flex",
+                      gap: 10,
+                      flexWrap: "wrap",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 11, color: theme.subtleText, fontWeight: 700, letterSpacing: "0.05em" }}>
+                        CODE: <span style={{ color: theme.title, fontWeight: 900 }}>{a.code}</span>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: theme.mutedText,
+                          fontWeight: 600,
+                          marginTop: 4,
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {url}
+                      </div>
+                    </div>
+                    <CopyButton text={url} onCopy={() => showToast("success", "Link copied.")} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Editor modal */}
+      {editorOpen && (
+        <AssessmentEditor
+          mode={editorMode}
+          draft={draft}
+          setDraft={setDraft}
+          createdInfo={createdInfo}
+          saving={saving}
+          onClose={() => {
+            setEditorOpen(false);
+            setCreatedInfo(null);
+          }}
+          onSave={handleSave}
+        />
+      )}
+    </div>
+  );
+}
+
+function validateDraft(d: AssessmentDraft): string | null {
+  if (!d.title.trim()) return "Title is required.";
+  if (d.passingPercentage < 0 || d.passingPercentage > 100)
+    return "Passing percentage must be between 0 and 100.";
+  if (d.maxAttempts < 1 || d.maxAttempts > 10) return "Attempts must be between 1 and 10.";
+  if (d.questions.length === 0) return "Add at least one question.";
+  for (const [i, q] of d.questions.entries()) {
+    if (!q.text.trim()) return `Question ${i + 1} text is required.`;
+    if (q.options.length < 2) return `Question ${i + 1} needs at least 2 options.`;
+    if (q.options.length > 4) return `Question ${i + 1} can have at most 4 options.`;
+    for (const [j, opt] of q.options.entries()) {
+      if (!opt.trim()) return `Question ${i + 1} option ${j + 1} is empty.`;
+    }
+    if (q.correctAnswerIndex < 0 || q.correctAnswerIndex >= q.options.length) {
+      return `Question ${i + 1}: pick a correct answer.`;
+    }
+  }
+  return null;
+}
+
+function AssessmentEditor({
+  mode,
+  draft,
+  setDraft,
+  createdInfo,
+  saving,
+  onClose,
+  onSave,
+}: {
+  mode: "create" | "edit";
+  draft: AssessmentDraft;
+  setDraft: React.Dispatch<React.SetStateAction<AssessmentDraft>>;
+  createdInfo: { code: string; url: string } | null;
+  saving: boolean;
+  onClose: () => void;
+  onSave: () => Promise<void>;
+}) {
+  const theme = getThemePalette();
+
+  const setField = <K extends keyof AssessmentDraft>(key: K, value: AssessmentDraft[K]) => {
+    setDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const setQuestion = (idx: number, patch: Partial<AssessmentDraftQuestion>) => {
+    setDraft((prev) => {
+      const next = [...prev.questions];
+      next[idx] = { ...next[idx], ...patch };
+      return { ...prev, questions: next };
+    });
+  };
+
+  const addOption = (qIdx: number) => {
+    setDraft((prev) => {
+      const next = [...prev.questions];
+      const q = next[qIdx];
+      if (q.options.length >= 4) return prev;
+      next[qIdx] = { ...q, options: [...q.options, ""] };
+      return { ...prev, questions: next };
+    });
+  };
+
+  const removeOption = (qIdx: number, oIdx: number) => {
+    setDraft((prev) => {
+      const next = [...prev.questions];
+      const q = next[qIdx];
+      if (q.options.length <= 2) return prev;
+      const newOpts = q.options.filter((_, i) => i !== oIdx);
+      let correct = q.correctAnswerIndex;
+      if (oIdx === q.correctAnswerIndex) correct = 0;
+      else if (oIdx < q.correctAnswerIndex) correct = q.correctAnswerIndex - 1;
+      next[qIdx] = { ...q, options: newOpts, correctAnswerIndex: correct };
+      return { ...prev, questions: next };
+    });
+  };
+
+  const addQuestion = () => {
+    setDraft((prev) => ({ ...prev, questions: [...prev.questions, emptyQuestion()] }));
+  };
+
+  const removeQuestion = (idx: number) => {
+    setDraft((prev) => {
+      if (prev.questions.length <= 1) return prev;
+      return { ...prev, questions: prev.questions.filter((_, i) => i !== idx) };
+    });
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: theme.modalOverlay,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 2500,
+        padding: 16,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          ...cardStyle(),
+          width: "100%",
+          maxWidth: 760,
+          maxHeight: "92vh",
+          overflowY: "auto",
+          padding: 24,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 16,
+            gap: 12,
+          }}
+        >
+          <div style={{ fontSize: 20, fontWeight: 900, color: theme.title }}>
+            {mode === "create" ? "New Assessment" : "Edit Assessment"}
+          </div>
+          <button style={smallButtonStyle()} onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {createdInfo ? (
+          <div style={{ display: "grid", gap: 14 }}>
+            <div
+              style={{
+                background: "#dcfce7",
+                color: "#166534",
+                border: "1px solid #86efac",
+                borderRadius: 14,
+                padding: 14,
+                fontSize: 14,
+                fontWeight: 700,
+              }}
+            >
+              ✅ Assessment created. Share the link below with anyone you want to assess.
+            </div>
+            <div>
+              <label style={fieldLabel}>Code</label>
+              <div
+                style={{
+                  ...inputStyle(),
+                  fontFamily: "monospace",
+                  fontSize: 16,
+                  fontWeight: 800,
+                  letterSpacing: "0.06em",
+                }}
+              >
+                {createdInfo.code}
+              </div>
+            </div>
+            <div>
+              <label style={fieldLabel}>Public link</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={createdInfo.url}
+                  readOnly
+                  style={{ ...inputStyle(), flex: 1 }}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <CopyButton text={createdInfo.url} primary />
+              </div>
+            </div>
+            <button style={buttonStyle(true)} onClick={onClose}>
+              Done
+            </button>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div>
+                <label style={fieldLabel}>Title *</label>
+                <input
+                  value={draft.title}
+                  onChange={(e) => setField("title", e.target.value)}
+                  style={inputStyle()}
+                  placeholder="e.g. Onboarding Quiz"
+                />
+              </div>
+              <div>
+                <label style={fieldLabel}>Description / Instructions (optional)</label>
+                <textarea
+                  value={draft.description}
+                  onChange={(e) => setField("description", e.target.value)}
+                  rows={3}
+                  style={{ ...inputStyle(), resize: "vertical" }}
+                  placeholder="What participants should know before they start."
+                />
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <label style={fieldLabel}>Passing percentage</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={draft.passingPercentage}
+                    onChange={(e) =>
+                      setField("passingPercentage", Math.max(0, Math.min(100, Number(e.target.value) || 0)))
+                    }
+                    style={inputStyle()}
+                  />
+                </div>
+                <div>
+                  <label style={fieldLabel}>Max attempts per person</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={draft.maxAttempts}
+                    onChange={(e) =>
+                      setField("maxAttempts", Math.max(1, Math.min(10, Number(e.target.value) || 1)))
+                    }
+                    style={inputStyle()}
+                  />
+                </div>
+                <div>
+                  <label style={fieldLabel}>Active</label>
+                  <select
+                    value={draft.isActive ? "yes" : "no"}
+                    onChange={(e) => setField("isActive", e.target.value === "yes")}
+                    style={selectStyle()}
+                  >
+                    <option value="yes">Active</option>
+                    <option value="no">Disabled</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 20 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 10,
+                }}
+              >
+                <div style={{ fontSize: 16, fontWeight: 800, color: theme.title }}>Questions</div>
+                <button style={smallButtonStyle()} onClick={addQuestion}>
+                  ＋ Add question
+                </button>
+              </div>
+
+              <div style={{ display: "grid", gap: 12 }}>
+                {draft.questions.map((q, qIdx) => (
+                  <div
+                    key={q.id}
+                    style={{
+                      background: theme.fileCardBg,
+                      border: `1px solid ${theme.fileCardBorder}`,
+                      borderRadius: 14,
+                      padding: 14,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 8,
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 800, color: theme.subtleText }}>
+                        Question {qIdx + 1}
+                      </div>
+                      <button
+                        style={dangerButtonStyle()}
+                        onClick={() => removeQuestion(qIdx)}
+                        disabled={draft.questions.length <= 1}
+                        title={draft.questions.length <= 1 ? "At least one question is required" : "Remove"}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <input
+                      value={q.text}
+                      onChange={(e) => setQuestion(qIdx, { text: e.target.value })}
+                      placeholder="Question text"
+                      style={inputStyle()}
+                    />
+                    <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+                      {q.options.map((opt, oIdx) => (
+                        <div
+                          key={oIdx}
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
+                        >
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: 12,
+                              fontWeight: 700,
+                              color: theme.mutedText,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            <input
+                              type="radio"
+                              name={`correct_${q.id}`}
+                              checked={q.correctAnswerIndex === oIdx}
+                              onChange={() => setQuestion(qIdx, { correctAnswerIndex: oIdx })}
+                              style={{ accentColor: "#4338ca" }}
+                            />
+                            Correct
+                          </label>
+                          <input
+                            value={opt}
+                            onChange={(e) => {
+                              const next = [...q.options];
+                              next[oIdx] = e.target.value;
+                              setQuestion(qIdx, { options: next });
+                            }}
+                            placeholder={`Option ${oIdx + 1}`}
+                            style={{ ...inputStyle(), flex: 1 }}
+                          />
+                          <button
+                            style={smallButtonStyle()}
+                            onClick={() => removeOption(qIdx, oIdx)}
+                            disabled={q.options.length <= 2}
+                            title={q.options.length <= 2 ? "At least 2 options" : "Remove option"}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        style={smallButtonStyle()}
+                        onClick={() => addOption(qIdx)}
+                        disabled={q.options.length >= 4}
+                      >
+                        ＋ Add option {q.options.length >= 4 ? "(max 4)" : ""}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 18, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button style={smallButtonStyle()} onClick={onClose} disabled={saving}>
+                Cancel
+              </button>
+              <button style={buttonStyle(true)} onClick={onSave} disabled={saving}>
+                {saving ? "Saving…" : mode === "create" ? "Create assessment" : "Save changes"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CopyButton({
+  text,
+  onCopy,
+  primary,
+}: {
+  text: string;
+  onCopy?: () => void;
+  primary?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const doCopy = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      onCopy?.();
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error("Copy failed:", err);
+    }
+  };
+
+  return (
+    <button style={primary ? buttonStyle(true) : smallButtonStyle()} onClick={doCopy}>
+      {copied ? "✓ Copied" : "Copy"}
+    </button>
+  );
+}
+
+function AssessmentResults({
+  assessment,
+  submissions,
+  loading,
+  onBack,
+  onOpenSubmission,
+}: {
+  assessment: Assessment | undefined;
+  submissions: AssessmentSubmission[];
+  loading: boolean;
+  onBack: () => void;
+  onOpenSubmission: (id: string) => void;
+}) {
+  const theme = getThemePalette();
+  const isDark = getThemeMode() === "dark";
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return submissions;
+    return submissions.filter(
+      (s) =>
+        s.participantName.toLowerCase().includes(q) ||
+        s.phoneNumber.toLowerCase().includes(q)
+    );
+  }, [submissions, search]);
+
+  if (!assessment) {
+    return (
+      <div style={cardStyle()}>
+        <div style={{ marginBottom: 12 }}>
+          <button style={smallButtonStyle()} onClick={onBack}>
+            ← Back to Assessments
+          </button>
+        </div>
+        <EmptyState
+          title="Assessment not found"
+          description="This assessment may have been deleted."
+        />
+      </div>
+    );
+  }
+
+  const passes = submissions.filter((s) => s.status === "Pass").length;
+  const fails = submissions.length - passes;
+  const avgPct =
+    submissions.length === 0
+      ? 0
+      : Math.round(submissions.reduce((sum, s) => sum + s.percentage, 0) / submissions.length);
+
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <button style={smallButtonStyle()} onClick={onBack}>
+          ← Back to Assessments
+        </button>
+        <button
+          style={buttonStyle(false)}
+          onClick={() => printAllResults(assessment, submissions)}
+          disabled={submissions.length === 0}
+        >
+          🖨️ Print all results
+        </button>
+      </div>
+
+      <div style={cardStyle()}>
+        <div style={{ fontSize: 20, fontWeight: 900, color: theme.title }}>{assessment.title}</div>
+        {assessment.description && (
+          <div style={{ fontSize: 13, color: theme.subtleText, marginTop: 4 }}>
+            {assessment.description}
+          </div>
+        )}
+        <div style={{ marginTop: 10, fontSize: 12, color: theme.subtleText, display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <span>📋 {assessment.questions.length} questions</span>
+          <span>🎯 Passing: {assessment.passingPercentage}%</span>
+          <span>🔁 Max attempts: {assessment.maxAttempts}</span>
+          <span>🔑 Code: <strong>{assessment.code}</strong></span>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
+        <StatBox title="Submissions" value={submissions.length} hint="total" />
+        <StatBox title="Passes" value={passes} hint={submissions.length ? `${Math.round((passes / submissions.length) * 100)}%` : "—"} />
+        <StatBox title="Fails" value={fails} hint={submissions.length ? `${Math.round((fails / submissions.length) * 100)}%` : "—"} />
+        <StatBox title="Average score" value={submissions.length ? `${avgPct}%` : "—"} hint="across all attempts" />
+      </div>
+
+      <div style={{ ...cardStyle(), padding: 16 }}>
+        <input
+          placeholder="Search by name or phone…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ ...inputStyle(), maxWidth: 340 }}
+        />
+      </div>
+
+      {loading ? (
+        <SkeletonCard rows={4} />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          title="No submissions yet"
+          description="Share the assessment link to start collecting responses."
+          icon="📨"
+        />
+      ) : (
+        <div style={{ ...cardStyle(), padding: 0, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: isDark ? "#0f172a" : "#f9fafb", color: theme.mutedText }}>
+                <th style={th}>Name</th>
+                <th style={th}>Phone</th>
+                <th style={th}>Attempt</th>
+                <th style={th}>Score</th>
+                <th style={th}>%</th>
+                <th style={th}>Status</th>
+                <th style={th}>Submitted</th>
+                <th style={th}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((s) => (
+                <tr key={s.id} style={{ borderTop: `1px solid ${theme.cardBorder}` }}>
+                  <td style={td}>
+                    <div style={{ fontWeight: 700, color: theme.title }}>{s.participantName}</div>
+                  </td>
+                  <td style={td}>{s.phoneNumber}</td>
+                  <td style={td}>{s.attemptNumber}</td>
+                  <td style={td}>{s.score} / {s.totalQuestions}</td>
+                  <td style={td}>{s.percentage}%</td>
+                  <td style={td}>
+                    <span
+                      style={{
+                        padding: "3px 9px",
+                        borderRadius: 999,
+                        fontSize: 11,
+                        fontWeight: 800,
+                        background:
+                          s.status === "Pass"
+                            ? (isDark ? "rgba(16,185,129,0.14)" : "#dcfce7")
+                            : (isDark ? "rgba(239,68,68,0.14)" : "#fee2e2"),
+                        color:
+                          s.status === "Pass"
+                            ? (isDark ? "#34d399" : "#166534")
+                            : (isDark ? "#f87171" : "#991b1b"),
+                      }}
+                    >
+                      {s.status}
+                    </span>
+                  </td>
+                  <td style={td}>{fmtDateTime(s.submittedAt)}</td>
+                  <td style={td}>
+                    <button style={smallButtonStyle()} onClick={() => onOpenSubmission(s.id)}>
+                      View
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SubmissionDetail({
+  submission,
+  assessment,
+  onBack,
+}: {
+  submission: AssessmentSubmission;
+  assessment: Assessment | undefined;
+  onBack: () => void;
+}) {
+  const theme = getThemePalette();
+  const isDark = getThemeMode() === "dark";
+
+  // Use questions stored on the assessment if available, otherwise reconstruct from submission.correctAnswers
+  const questions: AssessmentQuestion[] = assessment
+    ? assessment.questions
+    : submission.correctAnswers.map((c, i) => ({
+        id: `q_${i}`,
+        text: `Question ${i + 1}`,
+        options: [],
+        correctAnswerIndex: c,
+      }));
+
+  return (
+    <div style={{ display: "grid", gap: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <button style={smallButtonStyle()} onClick={onBack}>
+          ← Back to results
+        </button>
+        <button
+          style={buttonStyle(false)}
+          onClick={() => printSingleResult(submission, assessment)}
+        >
+          🖨️ Print result
+        </button>
+      </div>
+
+      <div style={cardStyle()}>
+        <div style={{ fontSize: 20, fontWeight: 900, color: theme.title }}>
+          {submission.assessmentTitle}
+        </div>
+        <div style={{ fontSize: 13, color: theme.subtleText, marginTop: 4 }}>
+          Attempt {submission.attemptNumber} · Submitted {fmtDateTime(submission.submittedAt)}
+        </div>
+        <div
+          style={{
+            marginTop: 14,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+            gap: 10,
+          }}
+        >
+          <StatBox title="Participant" value={submission.participantName} hint={submission.phoneNumber} />
+          <StatBox title="Score" value={`${submission.score} / ${submission.totalQuestions}`} hint="correct answers" />
+          <StatBox title="Percentage" value={`${submission.percentage}%`} hint={`Passing ${assessment?.passingPercentage ?? "—"}%`} />
+          <StatBox title="Status" value={submission.status} hint={submission.status === "Pass" ? "Above passing mark" : "Below passing mark"} />
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gap: 12 }}>
+        <SectionTitle>Answers</SectionTitle>
+        {questions.map((q, qIdx) => {
+          const chosen = submission.answers[qIdx];
+          const correct = q.correctAnswerIndex;
+          const ok = chosen === correct;
+          return (
+            <div
+              key={q.id}
+              style={{
+                ...softCardStyle(),
+                borderLeft: `4px solid ${ok ? "#10b981" : "#ef4444"}`,
+              }}
+            >
+              <div style={{ fontSize: 12, color: theme.subtleText, fontWeight: 700, marginBottom: 4 }}>
+                Question {qIdx + 1} · {ok ? "Correct" : "Incorrect"}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: theme.title }}>{q.text}</div>
+              <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                {q.options.length > 0 ? (
+                  q.options.map((opt, oIdx) => {
+                    const isChosen = oIdx === chosen;
+                    const isCorrect = oIdx === correct;
+                    let bg = isDark ? "#0f172a" : "#f9fafb";
+                    let color = theme.mutedText;
+                    let border = theme.cardBorder;
+                    let suffix = "";
+                    if (isCorrect) {
+                      bg = isDark ? "rgba(16,185,129,0.14)" : "#dcfce7";
+                      color = isDark ? "#34d399" : "#166534";
+                      border = isDark ? "rgba(16,185,129,0.3)" : "#86efac";
+                      suffix = "  (correct answer)";
+                    }
+                    if (isChosen && !isCorrect) {
+                      bg = isDark ? "rgba(239,68,68,0.14)" : "#fee2e2";
+                      color = isDark ? "#f87171" : "#991b1b";
+                      border = isDark ? "rgba(239,68,68,0.3)" : "#fecaca";
+                      suffix = "  (their answer)";
+                    } else if (isChosen && isCorrect) {
+                      suffix = "  (their answer · correct)";
+                    }
+                    return (
+                      <div
+                        key={oIdx}
+                        style={{
+                          padding: "8px 12px",
+                          borderRadius: 10,
+                          background: bg,
+                          color,
+                          border: `1px solid ${border}`,
+                          fontSize: 13,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {opt}
+                        <span style={{ fontWeight: 700, opacity: 0.8 }}>{suffix}</span>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div style={{ fontSize: 12, color: theme.subtleText }}>
+                    Their answer: option {chosen + 1} · Correct: option {correct + 1}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Print helpers (HTML window pattern, matches existing employee report style) ────
+function printSingleResult(s: AssessmentSubmission, assessment: Assessment | undefined) {
+  const html = buildSingleResultHtml(s, assessment);
+  openPrintWindow(html);
+}
+
+function printAllResults(assessment: Assessment, submissions: AssessmentSubmission[]) {
+  const html = buildAllResultsHtml(assessment, submissions);
+  openPrintWindow(html);
+}
+
+function openPrintWindow(html: string) {
+  const win = window.open("", "_blank");
+  if (!win) return;
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+}
+
+function buildSingleResultHtml(s: AssessmentSubmission, assessment: Assessment | undefined): string {
+  const questions: AssessmentQuestion[] = assessment
+    ? assessment.questions
+    : s.correctAnswers.map((c, i) => ({
+        id: `q_${i}`,
+        text: `Question ${i + 1}`,
+        options: [],
+        correctAnswerIndex: c,
+      }));
+
+  const statusColor = s.status === "Pass" ? "#15803d" : "#b91c1c";
+  const statusBg = s.status === "Pass" ? "#dcfce7" : "#fee2e2";
+
+  return `<!doctype html><html><head><meta charset="utf-8"/>
+<title>Assessment Result — ${escHtml(s.participantName)}</title>
+<style>
+  ${printCss()}
+</style></head><body><div class="page">
+  ${headerHtml(escHtml(s.assessmentTitle))}
+  <div class="meta-grid">
+    <div><div class="lbl">Participant</div><div class="val">${escHtml(s.participantName)}</div></div>
+    <div><div class="lbl">Phone</div><div class="val">${escHtml(s.phoneNumber)}</div></div>
+    <div><div class="lbl">Attempt</div><div class="val">${s.attemptNumber} of ${assessment?.maxAttempts ?? "—"}</div></div>
+    <div><div class="lbl">Submitted</div><div class="val">${escHtml(fmtDateTime(s.submittedAt))}</div></div>
+  </div>
+  <div class="result-box" style="background:${statusBg};border-color:${statusColor};color:${statusColor}">
+    <div class="result-num">${s.score} / ${s.totalQuestions}  ·  ${s.percentage}%</div>
+    <div class="result-lbl">${escHtml(s.status)} (passing ${assessment?.passingPercentage ?? "—"}%)</div>
+  </div>
+  <h2 class="sec">Answers</h2>
+  ${questions
+    .map((q, qIdx) => {
+      const chosen = s.answers[qIdx];
+      const correct = q.correctAnswerIndex;
+      const ok = chosen === correct;
+      const optsHtml =
+        q.options.length > 0
+          ? q.options
+              .map((opt, oIdx) => {
+                const isChosen = oIdx === chosen;
+                const isCorrect = oIdx === correct;
+                let cls = "opt";
+                if (isCorrect) cls += " opt-correct";
+                if (isChosen && !isCorrect) cls += " opt-wrong";
+                let suffix = "";
+                if (isCorrect && isChosen) suffix = " (their answer · correct)";
+                else if (isCorrect) suffix = " (correct answer)";
+                else if (isChosen) suffix = " (their answer)";
+                return `<div class="${cls}">${escHtml(opt)}<span class="suffix">${escHtml(suffix)}</span></div>`;
+              })
+              .join("")
+          : `<div class="opt">Their answer: option ${chosen + 1} · Correct: option ${correct + 1}</div>`;
+      return `<div class="q ${ok ? "q-ok" : "q-bad"}">
+        <div class="q-num">Question ${qIdx + 1} · ${ok ? "Correct" : "Incorrect"}</div>
+        <div class="q-text">${escHtml(q.text)}</div>
+        <div class="opts">${optsHtml}</div>
+      </div>`;
+    })
+    .join("")}
+  ${printActionsHtml()}
+</div></body></html>`;
+}
+
+function buildAllResultsHtml(assessment: Assessment, submissions: AssessmentSubmission[]): string {
+  const sorted = [...submissions].sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : -1));
+  const passes = sorted.filter((s) => s.status === "Pass").length;
+  const fails = sorted.length - passes;
+  const avg =
+    sorted.length === 0
+      ? 0
+      : Math.round(sorted.reduce((sum, s) => sum + s.percentage, 0) / sorted.length);
+
+  return `<!doctype html><html><head><meta charset="utf-8"/>
+<title>Assessment Results — ${escHtml(assessment.title)}</title>
+<style>${printCss()}</style></head><body><div class="page">
+  ${headerHtml(escHtml(assessment.title))}
+  <div class="meta-grid">
+    <div><div class="lbl">Code</div><div class="val">${escHtml(assessment.code)}</div></div>
+    <div><div class="lbl">Questions</div><div class="val">${assessment.questions.length}</div></div>
+    <div><div class="lbl">Passing</div><div class="val">${assessment.passingPercentage}%</div></div>
+    <div><div class="lbl">Max attempts</div><div class="val">${assessment.maxAttempts}</div></div>
+  </div>
+  <div class="summary-row">
+    <div class="stat"><div class="stat-lbl">Submissions</div><div class="stat-val">${sorted.length}</div></div>
+    <div class="stat"><div class="stat-lbl">Passes</div><div class="stat-val">${passes}</div></div>
+    <div class="stat"><div class="stat-lbl">Fails</div><div class="stat-val">${fails}</div></div>
+    <div class="stat"><div class="stat-lbl">Average</div><div class="stat-val">${sorted.length ? avg + "%" : "—"}</div></div>
+  </div>
+  <h2 class="sec">All submissions</h2>
+  <table class="tbl">
+    <thead><tr>
+      <th>Name</th><th>Phone</th><th>Attempt</th><th>Score</th><th>%</th><th>Status</th><th>Submitted</th>
+    </tr></thead>
+    <tbody>
+      ${sorted
+        .map(
+          (s) => `<tr>
+            <td>${escHtml(s.participantName)}</td>
+            <td>${escHtml(s.phoneNumber)}</td>
+            <td>${s.attemptNumber}</td>
+            <td>${s.score} / ${s.totalQuestions}</td>
+            <td>${s.percentage}%</td>
+            <td><span class="badge ${s.status === "Pass" ? "badge-pass" : "badge-fail"}">${escHtml(s.status)}</span></td>
+            <td>${escHtml(fmtDateTime(s.submittedAt))}</td>
+          </tr>`
+        )
+        .join("")}
+    </tbody>
+  </table>
+  ${printActionsHtml()}
+</div></body></html>`;
+}
+
+function headerHtml(title: string): string {
+  return `<div class="hdr">
+    <div class="brand">
+      <div class="brand-name">${escHtml(COMPANY_NAME)}</div>
+      <div class="brand-sub">${escHtml(SYSTEM_NAME)}</div>
+    </div>
+    <div class="doc-title">${title}</div>
+  </div>`;
+}
+
+function printActionsHtml(): string {
+  return `<div class="no-print" style="margin-top:20px;text-align:right">
+    <button onclick="window.print()" style="padding:10px 16px;border:none;border-radius:10px;background:#4338ca;color:#fff;font-weight:700;cursor:pointer">🖨️ Print</button>
+    <button onclick="window.close()" style="padding:10px 16px;border:1px solid #d1d5db;border-radius:10px;background:#fff;color:#111827;font-weight:600;cursor:pointer;margin-left:8px">Close</button>
+  </div>`;
+}
+
+function printCss(): string {
+  return `
+    *{box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:#f8fafc;color:#111827;margin:0;padding:24px}
+    .page{max-width:880px;margin:0 auto;background:#fff;border-radius:14px;padding:32px;box-shadow:0 4px 12px rgba(15,23,42,0.08)}
+    .hdr{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;border-bottom:2px solid #e5e7eb;padding-bottom:14px;margin-bottom:18px;flex-wrap:wrap}
+    .brand-name{font-size:18px;font-weight:900;color:#111827}
+    .brand-sub{font-size:12px;color:#6b7280;font-weight:600;margin-top:2px}
+    .doc-title{font-size:20px;font-weight:900;color:#4338ca}
+    .meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;background:#f9fafb;padding:14px;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:16px}
+    .lbl{font-size:11px;color:#6b7280;font-weight:700;letter-spacing:0.04em;text-transform:uppercase}
+    .val{font-size:14px;color:#111827;font-weight:700;margin-top:2px;word-break:break-word}
+    .result-box{padding:18px;border-radius:14px;border:2px solid;margin-bottom:18px;text-align:center}
+    .result-num{font-size:28px;font-weight:900;letter-spacing:-0.02em}
+    .result-lbl{font-size:13px;font-weight:700;margin-top:4px}
+    .summary-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px}
+    .stat{background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:14px}
+    .stat-lbl{font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase}
+    .stat-val{font-size:22px;font-weight:900;color:#111827;margin-top:4px}
+    .sec{font-size:16px;font-weight:800;color:#111827;margin:18px 0 10px}
+    .q{background:#f9fafb;border:1px solid #e5e7eb;border-left:4px solid #9ca3af;border-radius:10px;padding:12px;margin-bottom:10px}
+    .q-ok{border-left-color:#10b981}
+    .q-bad{border-left-color:#ef4444}
+    .q-num{font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase}
+    .q-text{font-size:14px;font-weight:700;color:#111827;margin-top:4px}
+    .opts{display:grid;gap:6px;margin-top:8px}
+    .opt{padding:6px 10px;border-radius:8px;background:#fff;border:1px solid #e5e7eb;font-size:13px;color:#374151}
+    .opt-correct{background:#dcfce7;border-color:#86efac;color:#166534;font-weight:700}
+    .opt-wrong{background:#fee2e2;border-color:#fecaca;color:#991b1b;font-weight:700}
+    .suffix{font-weight:600;opacity:0.8;margin-left:4px}
+    .tbl{width:100%;border-collapse:collapse;font-size:13px}
+    .tbl th,.tbl td{padding:8px 10px;text-align:left;border-bottom:1px solid #e5e7eb}
+    .tbl th{background:#f9fafb;font-weight:800;color:#374151}
+    .badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:800}
+    .badge-pass{background:#dcfce7;color:#166534}
+    .badge-fail{background:#fee2e2;color:#991b1b}
+    @media print{
+      body{background:#fff;padding:0}
+      .page{box-shadow:none;border-radius:0;padding:18px}
+      .no-print{display:none!important}
+    }
+  `;
+}
+
+const fieldLabel: React.CSSProperties = {
+  display: "block",
+  marginBottom: 6,
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#374151",
+};
+
+const th: React.CSSProperties = {
+  padding: "10px 12px",
+  textAlign: "left",
+  fontSize: 12,
+  fontWeight: 800,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  whiteSpace: "nowrap",
+};
+
+const td: React.CSSProperties = {
+  padding: "10px 12px",
+  fontSize: 13,
+  verticalAlign: "middle",
+};

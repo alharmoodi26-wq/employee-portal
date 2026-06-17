@@ -115,6 +115,47 @@ export type EmployeeReportData = {
   summary: string;
 };
 
+// ── Assessments (Quizzes) ──────────────────────────────────────────────
+export type AssessmentQuestion = {
+  id: string;
+  text: string;
+  options: string[];
+  correctAnswerIndex: number;
+};
+
+export type Assessment = {
+  id: string;
+  title: string;
+  description: string;
+  passingPercentage: number;
+  maxAttempts: number;
+  code: string;
+  questions: AssessmentQuestion[];
+  createdAt: string;
+  createdBy: string;
+  createdByName: string;
+  isActive: boolean;
+};
+
+export type AssessmentSubmissionStatus = "Pass" | "Fail";
+
+export type AssessmentSubmission = {
+  id: string;
+  assessmentId: string;
+  assessmentCode: string;
+  assessmentTitle: string;
+  participantName: string;
+  phoneNumber: string;
+  attemptNumber: number;
+  answers: number[];
+  correctAnswers: number[];
+  score: number;
+  totalQuestions: number;
+  percentage: number;
+  status: AssessmentSubmissionStatus;
+  submittedAt: string;
+};
+
 export const COMPANY_NAME = "Emirates International Holdings Group";
 export const SYSTEM_NAME = "Employee Work Management Portal";
 
