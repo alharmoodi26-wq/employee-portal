@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "../../../lib/firebase-admin";
+import { AdminInitError, getAdminDb } from "../../../lib/firebase-admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -166,7 +166,15 @@ export async function POST(req: NextRequest) {
       status,
     });
   } catch (err) {
-    console.error(`[pa-submit:${reqId}] error:`, err);
-    return NextResponse.json({ code: "server_error" }, { status: 500 });
+    if (err instanceof AdminInitError) {
+      console.error(`[pa-submit:${reqId}] admin init failed: ${err.kind} — ${err.message}`);
+      return NextResponse.json(
+        { code: "server_misconfigured", kind: err.kind, detail: err.message },
+        { status: 500 }
+      );
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[pa-submit:${reqId}] error:`, msg);
+    return NextResponse.json({ code: "server_error", detail: msg }, { status: 500 });
   }
 }

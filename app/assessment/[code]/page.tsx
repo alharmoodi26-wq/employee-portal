@@ -89,6 +89,7 @@ export default function PublicAssessmentPage() {
 
         if (!res.ok) {
           const c = typeof data?.code === "string" ? data.code : "";
+          const detail = typeof data?.detail === "string" ? data.detail : "";
           if (c === "not_found") {
             setStage("not_found");
             return;
@@ -102,8 +103,21 @@ export default function PublicAssessmentPage() {
             setErrorMsg("This assessment has no questions yet.");
             return;
           }
+          if (c === "server_misconfigured") {
+            setStage("error");
+            setErrorMsg(
+              detail
+                ? `Server configuration issue. ${detail} Please ask the administrator to fix this.`
+                : "Server is not fully configured. Please contact the administrator."
+            );
+            return;
+          }
           setStage("error");
-          setErrorMsg("Could not load the assessment. Please try again later.");
+          setErrorMsg(
+            detail
+              ? `Could not load the assessment: ${detail}`
+              : "Could not load the assessment. Please try again later."
+          );
           return;
         }
 
@@ -158,6 +172,7 @@ export default function PublicAssessmentPage() {
 
       if (!res.ok) {
         const c = typeof data?.code === "string" ? data.code : "";
+        const detail = typeof data?.detail === "string" ? data.detail : "";
         if (c === "inactive") {
           setStage("inactive");
           return;
@@ -166,8 +181,21 @@ export default function PublicAssessmentPage() {
           setStage("not_found");
           return;
         }
+        if (c === "server_misconfigured") {
+          setStage("error");
+          setErrorMsg(
+            detail
+              ? `Server configuration issue. ${detail} Please ask the administrator to fix this.`
+              : "Server is not fully configured. Please contact the administrator."
+          );
+          return;
+        }
         setStage("error");
-        setErrorMsg("Could not verify attempt count. Please try again.");
+        setErrorMsg(
+          detail
+            ? `Could not verify attempt count: ${detail}`
+            : "Could not verify attempt count. Please try again."
+        );
         return;
       }
 
@@ -215,6 +243,7 @@ export default function PublicAssessmentPage() {
 
       if (!res.ok) {
         const c = typeof data?.code === "string" ? data.code : "";
+        const detail = typeof data?.detail === "string" ? data.detail : "";
         if (c === "max_attempts") {
           const used = typeof data?.attemptsUsed === "number" ? data.attemptsUsed : 0;
           setPreviousAttempts(used);
@@ -234,8 +263,21 @@ export default function PublicAssessmentPage() {
           setErrorMsg("Some answers were invalid. Please reload and try again.");
           return;
         }
+        if (c === "server_misconfigured") {
+          setStage("error");
+          setErrorMsg(
+            detail
+              ? `Server configuration issue. ${detail} Please ask the administrator to fix this.`
+              : "Server is not fully configured. Please contact the administrator."
+          );
+          return;
+        }
         setStage("error");
-        setErrorMsg("Could not submit your answers. Please try again.");
+        setErrorMsg(
+          detail
+            ? `Could not submit your answers: ${detail}`
+            : "Could not submit your answers. Please try again."
+        );
         return;
       }
 
