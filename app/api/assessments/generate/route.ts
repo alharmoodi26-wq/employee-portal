@@ -34,9 +34,24 @@ REQUIREMENTS:
 - Match the language of the source document (Arabic source → Arabic questions; English source → English questions). Mixed-language source → English by default.
 - Provide a short 1-sentence "explanation" for each question that justifies the correct answer.
 - Suggest a sensible quiz "title" derived from the document subject.
-- Suggest a 1-2 sentence "description" telling the participant what the quiz covers.
 - Default "passingPercentage" to 70 unless the document specifies otherwise.
 - Default "maxAttempts" to 2.
+
+INSTRUCTIONS (the "description" field) — read this rule carefully:
+1. FIRST, scan the document for explicit assessment instructions. Look for sections labeled:
+   - "Instructions", "Assessment Instructions", "Quiz Instructions", "Test Instructions",
+     "Guidelines", "Directions", "How to take this test/quiz/assessment",
+     "تعليمات", "تعليمات الاختبار", "إرشادات", "كيفية الإجابة".
+   Also look for the document's own preamble that explicitly tells the participant how to take the assessment (time limit, allowed materials, marking scheme, what to do with each question, etc).
+2. IF such instructions are present in the document:
+   - Extract them and put them in "description" verbatim, or as a faithful close paraphrase that preserves the same meaning, tone, and language.
+   - Do NOT replace, rewrite with different wording, summarize away important details, or substitute generic guidance.
+   - Do NOT mix the document's instructions with extra advice you invented.
+3. IF the document contains NO instructions at all:
+   - You MAY write a short, neutral default in "description", such as:
+     "Please read each question carefully and select the best answer."
+   - Keep it generic and one or two sentences.
+4. Never invent quiz rules (passing score, time limit, attempt count) that are not stated in the document — those go in their own fields, not in "description".
 
 OUTPUT:
 Return ONLY valid JSON in this exact shape (no markdown fences, no commentary):

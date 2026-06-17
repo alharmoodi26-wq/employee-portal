@@ -997,6 +997,19 @@ function AssessmentEditor({
                   style={{ ...inputStyle(), resize: "vertical" }}
                   placeholder="What participants should know before they start."
                 />
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 12,
+                    color: "#92400e",
+                    fontWeight: 600,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  ⚠️ Please review the instructions before saving.
+                </div>
               </div>
               <div
                 style={{
