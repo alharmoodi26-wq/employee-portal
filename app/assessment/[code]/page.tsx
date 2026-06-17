@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   addDoc,
   collection,
+  getCountFromServer,
   getDocs,
   limit,
   query,
@@ -71,6 +72,9 @@ export default function PublicAssessmentPage() {
     attempt: number;
     perQuestion: { questionText: string; chosen: number; correct: number; ok: boolean; options: string[] }[];
   } | null>(null);
+
+  // Hard-guard against double Submit clicks beyond the React state debounce
+  const submitInFlight = useRef(false);
 
   // Fetch assessment by code
   useEffect(() => {
@@ -165,13 +169,15 @@ export default function PublicAssessmentPage() {
     setStage("checking");
     try {
       const phone = normalizePhone(phoneNumber);
+      // Server-side aggregation: one round-trip, no document payloads — much faster
+      // than getDocs() when a person has previous attempts or the project grows.
       const q = query(
         collection(db, "assessmentSubmissions"),
         where("assessmentId", "==", assessment.id),
         where("phoneNumber", "==", phone)
       );
-      const snap = await getDocs(q);
-      const used = snap.size;
+      const countSnap = await getCountFromServer(q);
+      const used = countSnap.data().count;
       setPreviousAttempts(used);
 
       if (used >= assessment.maxAttempts) {
@@ -195,18 +201,21 @@ export default function PublicAssessmentPage() {
   const submitAnswers = async () => {
     if (!assessment) return;
     if (!allAnswered) return;
+    // Hard guard: prevents a fast second click / Enter-key replay from launching a second request
+    if (submitInFlight.current) return;
+    submitInFlight.current = true;
 
     setStage("submitting");
     try {
-      // Re-check attempts server-side just before submitting (race-safety)
+      // Re-check attempts right before insert using server-side COUNT (1 RTT, no payload)
       const phone = normalizePhone(phoneNumber);
       const q = query(
         collection(db, "assessmentSubmissions"),
         where("assessmentId", "==", assessment.id),
         where("phoneNumber", "==", phone)
       );
-      const snap = await getDocs(q);
-      const used = snap.size;
+      const countSnap = await getCountFromServer(q);
+      const used = countSnap.data().count;
 
       if (used >= assessment.maxAttempts) {
         setPreviousAttempts(used);
@@ -270,6 +279,8 @@ export default function PublicAssessmentPage() {
       } else {
         setErrorMsg("Could not submit your answers. Please try again.");
       }
+    } finally {
+      submitInFlight.current = false;
     }
   };
 
@@ -320,6 +331,17 @@ export default function PublicAssessmentPage() {
     return shell(
       <div style={cardStyle()}>
         <div style={{ textAlign: "center", padding: 40 }}>
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              border: "3px solid #e5e7eb",
+              borderTopColor: "#4338ca",
+              margin: "0 auto 14px",
+              animation: "assessSpin 0.8s linear infinite",
+            }}
+          />
           <div style={{ fontSize: 14, color: "#6b7280", fontWeight: 600 }}>
             {stage === "submitting"
               ? "Submitting your answers…"
@@ -327,6 +349,7 @@ export default function PublicAssessmentPage() {
               ? "Checking previous attempts…"
               : "Loading assessment…"}
           </div>
+          <style>{`@keyframes assessSpin { to { transform: rotate(360deg) } }`}</style>
         </div>
       </div>
     );

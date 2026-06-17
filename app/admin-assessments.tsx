@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { auth } from "./lib/firebase";
 import {
   Assessment,
   AssessmentQuestion,
@@ -29,6 +30,8 @@ export type AssessmentDraftQuestion = {
   text: string;
   options: string[];
   correctAnswerIndex: number;
+  // AI-only hint shown in the editor; never persisted to Firestore
+  explanation?: string;
 };
 
 export type AssessmentDraft = {
@@ -116,6 +119,12 @@ export default function AdminAssessments({
   const [createdInfo, setCreatedInfo] = useState<{ code: string; url: string } | null>(null);
   const [search, setSearch] = useState("");
 
+  // AI Generate-from-File state
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [generateLoading, setGenerateLoading] = useState(false);
+  const [generateFile, setGenerateFile] = useState<File | null>(null);
+  const generateInFlight = useRef(false);
+
   const submissionsByAssessment = useMemo(() => {
     const map = new Map<string, AssessmentSubmission[]>();
     for (const s of submissions) {
@@ -135,6 +144,144 @@ export default function AdminAssessments({
     setDraft(emptyDraft());
     setCreatedInfo(null);
     setEditorOpen(true);
+  };
+
+  const handleOpenGenerate = () => {
+    setGenerateFile(null);
+    setGenerateOpen(true);
+  };
+
+  const handleRunGenerate = async () => {
+    if (!generateFile) return;
+    if (generateInFlight.current) return;
+    generateInFlight.current = true;
+    setGenerateLoading(true);
+    try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) {
+        showToast("error", "Please sign in again.");
+        return;
+      }
+      const fd = new FormData();
+      fd.append("file", generateFile);
+      const res = await fetch("/api/assessments/generate", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` },
+        body: fd,
+      });
+
+      let data: Record<string, unknown> = {};
+      try {
+        data = await res.json();
+      } catch {
+        showToast("error", "Could not read the AI response. Please try again.");
+        return;
+      }
+      console.log("[assess-gen] response", res.status, data);
+
+      if (!res.ok) {
+        const code = typeof data?.code === "string" ? data.code : "";
+        if (res.status === 429 || code === "quota_exceeded") {
+          showToast("error", "AI quota reached. Please try again in a minute.");
+          return;
+        }
+        if (code === "file_invalid") {
+          showToast("error", "Unsupported file. Upload a PDF or an image (JPG/PNG).");
+          return;
+        }
+        if (res.status === 401 || code === "unauthorized") {
+          showToast("error", "Please sign in again.");
+          return;
+        }
+        if (code === "no_questions") {
+          showToast(
+            "error",
+            "Could not extract any usable questions from this file. Try a clearer source."
+          );
+          return;
+        }
+        showToast("error", "Could not generate the assessment. Please try again.");
+        return;
+      }
+
+      const apiDraft = (data?.draft ?? {}) as {
+        title?: string;
+        description?: string;
+        passingPercentage?: number;
+        maxAttempts?: number;
+        questions?: {
+          questionText?: string;
+          options?: string[];
+          correctAnswerIndex?: number;
+          explanation?: string | null;
+        }[];
+      };
+
+      const rawQuestions = Array.isArray(apiDraft.questions) ? apiDraft.questions : [];
+      const mappedQuestions: AssessmentDraftQuestion[] = rawQuestions
+        .map((q, i) => {
+          const text = typeof q.questionText === "string" ? q.questionText : "";
+          const opts = Array.isArray(q.options)
+            ? q.options.filter((o): o is string => typeof o === "string")
+            : [];
+          const correct =
+            typeof q.correctAnswerIndex === "number" ? q.correctAnswerIndex : 0;
+          return {
+            id: `q_ai_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+            text,
+            options: opts,
+            correctAnswerIndex: Math.max(0, Math.min(opts.length - 1, correct)),
+            explanation: typeof q.explanation === "string" ? q.explanation : undefined,
+          };
+        })
+        .filter((q) => q.text && q.options.length >= 2);
+
+      if (mappedQuestions.length === 0) {
+        showToast(
+          "error",
+          "AI returned no valid questions. Try a clearer document or write the assessment manually."
+        );
+        return;
+      }
+
+      const nextDraft: AssessmentDraft = {
+        title: (apiDraft.title || "").trim() || "Untitled Assessment",
+        description: (apiDraft.description || "").trim(),
+        passingPercentage:
+          typeof apiDraft.passingPercentage === "number" &&
+          apiDraft.passingPercentage >= 0 &&
+          apiDraft.passingPercentage <= 100
+            ? Math.round(apiDraft.passingPercentage)
+            : 70,
+        maxAttempts:
+          typeof apiDraft.maxAttempts === "number" &&
+          apiDraft.maxAttempts >= 1 &&
+          apiDraft.maxAttempts <= 10
+            ? Math.round(apiDraft.maxAttempts)
+            : 2,
+        isActive: true,
+        questions: mappedQuestions,
+      };
+
+      // Close upload modal, open the existing editor in CREATE mode pre-filled
+      setGenerateOpen(false);
+      setGenerateFile(null);
+      setEditorMode("create");
+      setEditingId(null);
+      setDraft(nextDraft);
+      setCreatedInfo(null);
+      setEditorOpen(true);
+      showToast(
+        "success",
+        `AI generated ${mappedQuestions.length} question${mappedQuestions.length === 1 ? "" : "s"}. Review and approve.`
+      );
+    } catch (err) {
+      console.error("Error generating assessment:", err);
+      showToast("error", "Could not generate the assessment. Please try again.");
+    } finally {
+      setGenerateLoading(false);
+      generateInFlight.current = false;
+    }
   };
 
   const handleStartEdit = (a: Assessment) => {
@@ -283,9 +430,14 @@ export default function AdminAssessments({
             onChange={(e) => setSearch(e.target.value)}
             style={{ ...inputStyle(), maxWidth: 340 }}
           />
-          <button style={buttonStyle(true)} onClick={handleStartCreate}>
-            ＋ New Assessment
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button style={buttonStyle(false)} onClick={handleOpenGenerate}>
+              🪄 Generate from File
+            </button>
+            <button style={buttonStyle(true)} onClick={handleStartCreate}>
+              ＋ New Assessment
+            </button>
+          </div>
         </div>
       </div>
 
@@ -457,6 +609,196 @@ export default function AdminAssessments({
           onSave={handleSave}
         />
       )}
+
+      {/* Generate-from-File modal */}
+      {generateOpen && (
+        <GenerateFromFileModal
+          file={generateFile}
+          setFile={setGenerateFile}
+          loading={generateLoading}
+          onClose={() => {
+            if (generateLoading) return;
+            setGenerateOpen(false);
+            setGenerateFile(null);
+          }}
+          onRun={handleRunGenerate}
+        />
+      )}
+    </div>
+  );
+}
+
+function GenerateFromFileModal({
+  file,
+  setFile,
+  loading,
+  onClose,
+  onRun,
+}: {
+  file: File | null;
+  setFile: (f: File | null) => void;
+  loading: boolean;
+  onClose: () => void;
+  onRun: () => Promise<void>;
+}) {
+  const theme = getThemePalette();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: theme.modalOverlay,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 2500,
+        padding: 16,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          ...cardStyle(),
+          width: "100%",
+          maxWidth: 540,
+          padding: 24,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 14,
+          }}
+        >
+          <div style={{ fontSize: 20, fontWeight: 900, color: theme.title }}>
+            🪄 Generate Assessment from File
+          </div>
+          <button style={smallButtonStyle()} onClick={onClose} disabled={loading}>
+            Close
+          </button>
+        </div>
+
+        <p style={{ fontSize: 13, color: theme.subtleText, lineHeight: 1.7, marginTop: 0 }}>
+          Upload a PDF or image. The AI will read it and propose a quiz draft. Nothing is published
+          until you review and approve.
+        </p>
+
+        <input
+          ref={inputRef}
+          type="file"
+          accept="application/pdf,image/*"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          style={{ display: "none" }}
+        />
+
+        <div
+          style={{
+            background: theme.fileCardBg,
+            border: `1px dashed ${theme.fileCardBorder}`,
+            borderRadius: 14,
+            padding: 18,
+            marginTop: 14,
+            textAlign: "center",
+          }}
+        >
+          {file ? (
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: theme.title, wordBreak: "break-word" }}>
+                📄 {file.name}
+              </div>
+              <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 4 }}>
+                {(file.size / 1024 / 1024).toFixed(2)} MB
+              </div>
+              <button
+                style={{ ...smallButtonStyle(), marginTop: 10 }}
+                onClick={() => {
+                  setFile(null);
+                  if (inputRef.current) inputRef.current.value = "";
+                }}
+                disabled={loading}
+              >
+                Choose different file
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 28, marginBottom: 6 }}>📤</div>
+              <button
+                style={buttonStyle(false)}
+                onClick={() => inputRef.current?.click()}
+                disabled={loading}
+              >
+                Choose file
+              </button>
+              <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 8 }}>
+                PDF or image · up to 15 MB
+              </div>
+            </div>
+          )}
+        </div>
+
+        {loading && (
+          <div
+            style={{
+              marginTop: 14,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              padding: "10px 14px",
+              borderRadius: 12,
+              background: "rgba(99,102,241,0.08)",
+              border: "1px solid rgba(99,102,241,0.25)",
+              color: "#4338ca",
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            <div
+              style={{
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                border: "2px solid rgba(99,102,241,0.3)",
+                borderTopColor: "#4338ca",
+                animation: "assessGenSpin 0.7s linear infinite",
+              }}
+            />
+            Reading the file and generating questions…
+            <style>{`@keyframes assessGenSpin { to { transform: rotate(360deg) } }`}</style>
+          </div>
+        )}
+
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            marginTop: 18,
+            justifyContent: "flex-end",
+            flexWrap: "wrap",
+          }}
+        >
+          <button style={smallButtonStyle()} onClick={onClose} disabled={loading}>
+            Cancel
+          </button>
+          <button
+            style={{
+              ...buttonStyle(true),
+              opacity: file && !loading ? 1 : 0.55,
+              cursor: file && !loading ? "pointer" : "not-allowed",
+            }}
+            onClick={onRun}
+            disabled={!file || loading}
+          >
+            {loading ? "Generating…" : "Generate draft"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -755,6 +1097,23 @@ function AssessmentEditor({
                       placeholder="Question text"
                       style={inputStyle()}
                     />
+                    {q.explanation && (
+                      <div
+                        style={{
+                          marginTop: 8,
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          background: "rgba(99,102,241,0.06)",
+                          border: "1px solid rgba(99,102,241,0.2)",
+                          color: "#4338ca",
+                          fontSize: 12,
+                          fontWeight: 600,
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        🪄 AI explanation: <span style={{ fontWeight: 500 }}>{q.explanation}</span>
+                      </div>
+                    )}
                     <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
                       {q.options.map((opt, oIdx) => (
                         <div
