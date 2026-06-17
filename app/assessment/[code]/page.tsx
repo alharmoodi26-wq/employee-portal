@@ -2,33 +2,28 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import {
-  addDoc,
-  collection,
-  getCountFromServer,
-  getDocs,
-  limit,
-  query,
-  serverTimestamp,
-  where,
-} from "firebase/firestore";
-import { db } from "../../lib/firebase";
-import type {
-  Assessment,
-  AssessmentQuestion,
-  AssessmentSubmission,
-  AssessmentSubmissionStatus,
-} from "../../portal-utils";
+import type { AssessmentSubmissionStatus } from "../../portal-utils";
 
-// ── helpers ──────────────────────────────────────────────────────────
-function normalizePhone(raw: string): string {
-  return raw.replace(/\s|-/g, "").trim();
-}
+// ── Public-page types (assessment without correct answers) ───────────
+type PublicQuestion = {
+  id: string;
+  text: string;
+  options: string[];
+};
 
-function isValidPhone(raw: string): boolean {
-  const v = normalizePhone(raw);
-  return /^\+?\d{7,15}$/.test(v);
-}
+type PublicAssessment = {
+  id: string;
+  title: string;
+  description: string;
+  passingPercentage: number;
+  maxAttempts: number;
+  code: string;
+  questions: PublicQuestion[];
+  isActive: boolean;
+};
+
+const BRANCHES = ["PS Muraqqabat", "PS Karama"] as const;
+type Branch = (typeof BRANCHES)[number];
 
 function isValidName(raw: string): boolean {
   return raw.trim().length >= 2;
@@ -53,13 +48,13 @@ export default function PublicAssessmentPage() {
   const code = (params?.code || "").trim();
 
   const [stage, setStage] = useState<Stage>("loading");
-  const [assessment, setAssessment] = useState<Assessment | null>(null);
+  const [assessment, setAssessment] = useState<PublicAssessment | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
 
   const [participantName, setParticipantName] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
+  const [branch, setBranch] = useState<Branch | "">("");
   const [touchedName, setTouchedName] = useState(false);
-  const [touchedPhone, setTouchedPhone] = useState(false);
+  const [touchedBranch, setTouchedBranch] = useState(false);
 
   const [answers, setAnswers] = useState<LocalAnswer[]>([]);
   const [previousAttempts, setPreviousAttempts] = useState(0);
@@ -70,13 +65,11 @@ export default function PublicAssessmentPage() {
     percentage: number;
     status: AssessmentSubmissionStatus;
     attempt: number;
-    perQuestion: { questionText: string; chosen: number; correct: number; ok: boolean; options: string[] }[];
   } | null>(null);
 
-  // Hard-guard against double Submit clicks beyond the React state debounce
   const submitInFlight = useRef(false);
 
-  // Fetch assessment by code
+  // Fetch assessment by code via the public API (no auth needed)
   useEffect(() => {
     if (!code) {
       setStage("not_found");
@@ -86,61 +79,44 @@ export default function PublicAssessmentPage() {
     let cancelled = false;
     (async () => {
       try {
-        const q = query(
-          collection(db, "assessments"),
-          where("code", "==", code),
-          limit(1)
+        const res = await fetch(
+          `/api/public-assessment/get?code=${encodeURIComponent(code)}`,
+          { cache: "no-store" }
         );
-        const snap = await getDocs(q);
+        const data = await res.json().catch(() => ({}));
+
         if (cancelled) return;
 
-        if (snap.empty) {
-          setStage("not_found");
+        if (!res.ok) {
+          const c = typeof data?.code === "string" ? data.code : "";
+          if (c === "not_found") {
+            setStage("not_found");
+            return;
+          }
+          if (c === "inactive") {
+            setStage("inactive");
+            return;
+          }
+          if (c === "no_questions") {
+            setStage("error");
+            setErrorMsg("This assessment has no questions yet.");
+            return;
+          }
+          setStage("error");
+          setErrorMsg("Could not load the assessment. Please try again later.");
           return;
         }
 
-        const docSnap = snap.docs[0];
-        const data = docSnap.data();
-        const rawQuestions = Array.isArray(data.questions) ? data.questions : [];
-        const questions: AssessmentQuestion[] = rawQuestions.map((q: unknown, i: number) => {
-          const item = (q ?? {}) as Record<string, unknown>;
-          return {
-            id: typeof item.id === "string" ? item.id : `q_${i}`,
-            text: typeof item.text === "string" ? item.text : "",
-            options: Array.isArray(item.options)
-              ? (item.options as unknown[]).map((o) => (typeof o === "string" ? o : ""))
-              : [],
-            correctAnswerIndex:
-              typeof item.correctAnswerIndex === "number" ? item.correctAnswerIndex : 0,
-          };
-        });
-
-        const mapped: Assessment = {
-          id: docSnap.id,
-          title: typeof data.title === "string" ? data.title : "Untitled Assessment",
-          description: typeof data.description === "string" ? data.description : "",
-          passingPercentage:
-            typeof data.passingPercentage === "number" ? data.passingPercentage : 70,
-          maxAttempts: typeof data.maxAttempts === "number" ? data.maxAttempts : 2,
-          code: typeof data.code === "string" ? data.code : code,
-          questions,
-          createdAt: typeof data.createdAt === "string" ? data.createdAt : "",
-          createdBy: typeof data.createdBy === "string" ? data.createdBy : "",
-          createdByName: typeof data.createdByName === "string" ? data.createdByName : "",
-          isActive: data.isActive !== false,
-        };
-
-        setAssessment(mapped);
-        setAnswers(Array.from({ length: mapped.questions.length }, () => null));
-
-        if (!mapped.isActive) {
-          setStage("inactive");
-        } else if (mapped.questions.length === 0) {
+        const a = data?.assessment as PublicAssessment | undefined;
+        if (!a) {
           setStage("error");
-          setErrorMsg("This assessment has no questions yet.");
-        } else {
-          setStage("intro");
+          setErrorMsg("Could not load the assessment. Please try again later.");
+          return;
         }
+
+        setAssessment(a);
+        setAnswers(Array.from({ length: a.questions.length }, () => null));
+        setStage("intro");
       } catch (err) {
         console.error("Error loading assessment:", err);
         if (!cancelled) {
@@ -156,31 +132,49 @@ export default function PublicAssessmentPage() {
   }, [code]);
 
   const nameValid = isValidName(participantName);
-  const phoneValid = isValidPhone(phoneNumber);
+  const branchValid = branch === "PS Muraqqabat" || branch === "PS Karama";
 
   const checkAttemptsAndProceed = async () => {
     if (!assessment) return;
-    if (!nameValid || !phoneValid) {
+    if (!nameValid || !branchValid) {
       setTouchedName(true);
-      setTouchedPhone(true);
+      setTouchedBranch(true);
       return;
     }
 
     setStage("checking");
     try {
-      const phone = normalizePhone(phoneNumber);
-      // Server-side aggregation: one round-trip, no document payloads — much faster
-      // than getDocs() when a person has previous attempts or the project grows.
-      const q = query(
-        collection(db, "assessmentSubmissions"),
-        where("assessmentId", "==", assessment.id),
-        where("phoneNumber", "==", phone)
-      );
-      const countSnap = await getCountFromServer(q);
-      const used = countSnap.data().count;
+      const res = await fetch("/api/public-assessment/check-attempts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assessmentId: assessment.id,
+          participantName,
+          branch,
+        }),
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const c = typeof data?.code === "string" ? data.code : "";
+        if (c === "inactive") {
+          setStage("inactive");
+          return;
+        }
+        if (c === "not_found") {
+          setStage("not_found");
+          return;
+        }
+        setStage("error");
+        setErrorMsg("Could not verify attempt count. Please try again.");
+        return;
+      }
+
+      const used = typeof data?.attemptsUsed === "number" ? data.attemptsUsed : 0;
       setPreviousAttempts(used);
 
-      if (used >= assessment.maxAttempts) {
+      if (!data?.canAttempt) {
         setStage("max_attempts");
         return;
       }
@@ -201,95 +195,76 @@ export default function PublicAssessmentPage() {
   const submitAnswers = async () => {
     if (!assessment) return;
     if (!allAnswered) return;
-    // Hard guard: prevents a fast second click / Enter-key replay from launching a second request
     if (submitInFlight.current) return;
     submitInFlight.current = true;
 
     setStage("submitting");
     try {
-      // Re-check attempts right before insert using server-side COUNT (1 RTT, no payload)
-      const phone = normalizePhone(phoneNumber);
-      const q = query(
-        collection(db, "assessmentSubmissions"),
-        where("assessmentId", "==", assessment.id),
-        where("phoneNumber", "==", phone)
-      );
-      const countSnap = await getCountFromServer(q);
-      const used = countSnap.data().count;
+      const res = await fetch("/api/public-assessment/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assessmentId: assessment.id,
+          participantName,
+          branch,
+          answers,
+        }),
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
 
-      if (used >= assessment.maxAttempts) {
-        setPreviousAttempts(used);
-        setStage("max_attempts");
+      if (!res.ok) {
+        const c = typeof data?.code === "string" ? data.code : "";
+        if (c === "max_attempts") {
+          const used = typeof data?.attemptsUsed === "number" ? data.attemptsUsed : 0;
+          setPreviousAttempts(used);
+          setStage("max_attempts");
+          return;
+        }
+        if (c === "inactive") {
+          setStage("inactive");
+          return;
+        }
+        if (c === "not_found") {
+          setStage("not_found");
+          return;
+        }
+        if (c === "bad_answers") {
+          setStage("error");
+          setErrorMsg("Some answers were invalid. Please reload and try again.");
+          return;
+        }
+        setStage("error");
+        setErrorMsg("Could not submit your answers. Please try again.");
         return;
       }
 
-      const attemptNumber = used + 1;
-      const total = assessment.questions.length;
-      const correctAnswers = assessment.questions.map((q) => q.correctAnswerIndex);
-      let score = 0;
-      const perQuestion = assessment.questions.map((q, idx) => {
-        const chosen = answers[idx] as number;
-        const ok = chosen === q.correctAnswerIndex;
-        if (ok) score++;
-        return {
-          questionText: q.text,
-          chosen,
-          correct: q.correctAnswerIndex,
-          ok,
-          options: q.options,
-        };
-      });
-      const percentage = total > 0 ? Math.round((score / total) * 100) : 0;
-      const status: AssessmentSubmissionStatus =
-        percentage >= assessment.passingPercentage ? "Pass" : "Fail";
-
-      const submissionDoc = {
-        assessmentId: assessment.id,
-        assessmentCode: assessment.code,
-        assessmentTitle: assessment.title,
-        participantName: participantName.trim(),
-        phoneNumber: phone,
-        attemptNumber,
-        answers: answers.map((a) => (typeof a === "number" ? a : -1)),
-        correctAnswers,
-        score,
-        totalQuestions: total,
-        percentage,
-        status,
-        submittedAt: serverTimestamp(),
-      };
-
-      await addDoc(collection(db, "assessmentSubmissions"), submissionDoc);
-
       setResult({
-        score,
-        total,
-        percentage,
-        status,
-        attempt: attemptNumber,
-        perQuestion,
+        score: typeof data?.score === "number" ? data.score : 0,
+        total:
+          typeof data?.totalQuestions === "number"
+            ? data.totalQuestions
+            : assessment.questions.length,
+        percentage: typeof data?.percentage === "number" ? data.percentage : 0,
+        status: data?.status === "Pass" ? "Pass" : "Fail",
+        attempt: typeof data?.attemptNumber === "number" ? data.attemptNumber : 1,
       });
       setStage("result");
     } catch (err) {
       console.error("Error submitting assessment:", err);
       setStage("error");
-      const msg = err instanceof Error ? err.message : "";
-      if (/permission|insufficient/i.test(msg)) {
-        setErrorMsg("Submission was rejected by the server. Please contact the administrator.");
-      } else {
-        setErrorMsg("Could not submit your answers. Please try again.");
-      }
+      setErrorMsg("Could not submit your answers. Please try again.");
     } finally {
       submitInFlight.current = false;
     }
   };
 
-  // Shared layout shell
+  // Shared layout shell (brand updated to Philippine Supermarket)
   const shell = (content: React.ReactNode) => (
     <div
       style={{
         minHeight: "100vh",
-        background: "linear-gradient(160deg, #eef2ff 0%, #f8fafc 50%, #f0f4ff 100%)",
+        background: "linear-gradient(160deg, #fff7ed 0%, #fef3c7 50%, #fef9c3 100%)",
         padding: "32px 16px",
         display: "flex",
         flexDirection: "column",
@@ -302,23 +277,23 @@ export default function PublicAssessmentPage() {
             style={{
               width: 48,
               height: 48,
-              background: "linear-gradient(145deg, #0d1a30 0%, #1b2a4a 100%)",
+              background: "linear-gradient(145deg, #b91c1c 0%, #7f1d1d 100%)",
               borderRadius: 14,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              border: "1.5px solid rgba(240,192,64,0.45)",
+              border: "1.5px solid rgba(252,211,77,0.55)",
             }}
           >
-            <span style={{ color: "#F0C040", fontSize: 13, fontWeight: 900, letterSpacing: "0.06em", lineHeight: 1 }}>EIHG</span>
-            <span style={{ color: "#c9a520", fontSize: 6, fontWeight: 700, letterSpacing: "0.2em", lineHeight: 1, opacity: 0.75 }}>PORTAL</span>
+            <span style={{ color: "#FCD34D", fontSize: 13, fontWeight: 900, letterSpacing: "0.06em", lineHeight: 1 }}>PS</span>
+            <span style={{ color: "#fbbf24", fontSize: 6, fontWeight: 700, letterSpacing: "0.2em", lineHeight: 1, opacity: 0.85 }}>MARKET</span>
           </div>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#4338ca", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              Emirates International Holdings Group
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#b45309", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              Philippine Supermarket
             </div>
-            <div style={{ fontSize: 14, color: "#6b7280", fontWeight: 600 }}>Online Assessment</div>
+            <div style={{ fontSize: 14, color: "#78350f", fontWeight: 600 }}>Online Assessment</div>
           </div>
         </div>
 
@@ -336,8 +311,8 @@ export default function PublicAssessmentPage() {
               width: 36,
               height: 36,
               borderRadius: "50%",
-              border: "3px solid #e5e7eb",
-              borderTopColor: "#4338ca",
+              border: "3px solid #fde68a",
+              borderTopColor: "#b45309",
               margin: "0 auto 14px",
               animation: "assessSpin 0.8s linear infinite",
             }}
@@ -384,6 +359,9 @@ export default function PublicAssessmentPage() {
       <div style={cardStyle()}>
         <h1 style={titleStyle}>Something went wrong</h1>
         <p style={paragraphStyle}>{errorMsg || "Please try again later."}</p>
+        <button style={{ ...primaryButton, marginTop: 18 }} onClick={() => window.location.reload()}>
+          Try again
+        </button>
       </div>
     );
   }
@@ -433,24 +411,66 @@ export default function PublicAssessmentPage() {
             onBlur={() => setTouchedName(true)}
             invalid={touchedName && !nameValid}
             hint={touchedName && !nameValid ? "Please enter your full name." : ""}
-            placeholder="e.g. Ahmed Al Mansoori"
+            placeholder="e.g. Juan Dela Cruz"
             autoComplete="name"
           />
-          <Field
-            label="Phone number *"
-            value={phoneNumber}
-            onChange={(v) => setPhoneNumber(v)}
-            onBlur={() => setTouchedPhone(true)}
-            invalid={touchedPhone && !phoneValid}
-            hint={
-              touchedPhone && !phoneValid
-                ? "Enter a valid phone number (digits only, optional +)."
-                : "Used to track your attempts (max " + assessment.maxAttempts + ")."
-            }
-            placeholder="e.g. +9715XXXXXXXX"
-            autoComplete="tel"
-            inputMode="tel"
-          />
+
+          <div>
+            <label
+              style={{
+                display: "block",
+                marginBottom: 8,
+                fontSize: 13,
+                fontWeight: 700,
+                color: "#374151",
+              }}
+            >
+              Branch *
+            </label>
+            <div style={{ display: "grid", gap: 8 }}>
+              {BRANCHES.map((b) => {
+                const selected = branch === b;
+                const isInvalid = touchedBranch && !branchValid;
+                return (
+                  <label
+                    key={b}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "12px 14px",
+                      borderRadius: 12,
+                      border: selected
+                        ? "2px solid #b45309"
+                        : isInvalid
+                        ? "1px solid #ef4444"
+                        : "1px solid #d1d5db",
+                      background: selected ? "#fef3c7" : "#fff",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="branch"
+                      checked={selected}
+                      onChange={() => {
+                        setBranch(b);
+                        setTouchedBranch(true);
+                      }}
+                      style={{ accentColor: "#b45309" }}
+                    />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "#1f2937" }}>{b}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {touchedBranch && !branchValid && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#b91c1c", fontWeight: 600 }}>
+                Please choose your branch.
+              </div>
+            )}
+          </div>
         </div>
 
         <button
@@ -458,11 +478,11 @@ export default function PublicAssessmentPage() {
             ...primaryButton,
             marginTop: 24,
             width: "100%",
-            opacity: nameValid && phoneValid ? 1 : 0.6,
-            cursor: nameValid && phoneValid ? "pointer" : "not-allowed",
+            opacity: nameValid && branchValid ? 1 : 0.6,
+            cursor: nameValid && branchValid ? "pointer" : "not-allowed",
           }}
           onClick={checkAttemptsAndProceed}
-          disabled={!nameValid || !phoneValid}
+          disabled={!nameValid || !branchValid}
         >
           Start assessment →
         </button>
@@ -478,7 +498,7 @@ export default function PublicAssessmentPage() {
           <div>
             <h1 style={{ ...titleStyle, marginBottom: 4 }}>{assessment.title}</h1>
             <div style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>
-              {participantName} · Attempt {previousAttempts + 1} of {assessment.maxAttempts}
+              {participantName} · {branch} · Attempt {previousAttempts + 1} of {assessment.maxAttempts}
             </div>
           </div>
           <Pill label={`${remaining} attempt${remaining === 1 ? "" : "s"} left after this`} />
@@ -513,8 +533,8 @@ export default function PublicAssessmentPage() {
                         gap: 10,
                         padding: "11px 13px",
                         borderRadius: 12,
-                        border: selected ? "2px solid #4338ca" : "1px solid #d1d5db",
-                        background: selected ? "#eef2ff" : "#fff",
+                        border: selected ? "2px solid #b45309" : "1px solid #d1d5db",
+                        background: selected ? "#fef3c7" : "#fff",
                         cursor: "pointer",
                         transition: "all 0.15s ease",
                       }}
@@ -530,7 +550,7 @@ export default function PublicAssessmentPage() {
                             return next;
                           })
                         }
-                        style={{ accentColor: "#4338ca" }}
+                        style={{ accentColor: "#b45309" }}
                       />
                       <span style={{ fontSize: 14, color: "#1f2937", fontWeight: 600 }}>{opt}</span>
                     </label>
@@ -612,6 +632,9 @@ export default function PublicAssessmentPage() {
             <div style={{ fontSize: 13, color: "#374151", marginTop: 4 }}>
               Score: {result.score} / {result.total} · Passing: {assessment.passingPercentage}% · Attempt {result.attempt} of {assessment.maxAttempts}
             </div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+              Branch: <strong>{branch}</strong>
+            </div>
           </div>
         </div>
 
@@ -643,9 +666,9 @@ function Pill({ label }: { label: string }) {
         display: "inline-flex",
         alignItems: "center",
         padding: "5px 11px",
-        background: "#eef2ff",
-        color: "#4338ca",
-        border: "1px solid #c7d2fe",
+        background: "#fef3c7",
+        color: "#92400e",
+        border: "1px solid #fcd34d",
         borderRadius: 999,
         fontSize: 12,
         fontWeight: 800,
@@ -745,22 +768,19 @@ const primaryButton: React.CSSProperties = {
   padding: "13px 18px",
   borderRadius: 14,
   border: "none",
-  background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+  background: "linear-gradient(135deg, #b45309 0%, #92400e 100%)",
   color: "#ffffff",
   fontWeight: 800,
   fontSize: 15,
-  boxShadow: "0 4px 16px rgba(99,102,241,0.32)",
+  boxShadow: "0 4px 16px rgba(146,64,14,0.32)",
 };
 
 function cardStyle(): React.CSSProperties {
   return {
     background: "rgba(255,255,255,0.96)",
-    border: "1px solid #e5e7eb",
+    border: "1px solid #fde68a",
     borderRadius: 24,
     padding: 28,
-    boxShadow: "0 16px 38px rgba(15,23,42,0.07)",
+    boxShadow: "0 16px 38px rgba(146,64,14,0.08)",
   };
 }
-
-// Avoid unused-export warning by referencing the type
-export type _AssessmentSubmissionPlaceholder = AssessmentSubmission;

@@ -30,6 +30,7 @@ import AdminDashboard from "./admin-dashboard";
 import { AssessmentDraft } from "./admin-assessments";
 import {
   Assessment,
+  AssessmentBranch,
   AssessmentSubmission,
   AssessmentSubmissionStatus,
   AssignedTask,
@@ -1124,13 +1125,24 @@ export default function HomePage() {
               : "";
           const status: AssessmentSubmissionStatus =
             data.status === "Pass" ? "Pass" : "Fail";
+          const rawBranch = typeof data.branch === "string" ? data.branch : "";
+          const branch: AssessmentBranch | "" =
+            rawBranch === "PS Muraqqabat" || rawBranch === "PS Karama"
+              ? (rawBranch as AssessmentBranch)
+              : "";
           return {
             id: document.id,
             assessmentId: typeof data.assessmentId === "string" ? data.assessmentId : "",
             assessmentCode: typeof data.assessmentCode === "string" ? data.assessmentCode : "",
             assessmentTitle: typeof data.assessmentTitle === "string" ? data.assessmentTitle : "",
             participantName: typeof data.participantName === "string" ? data.participantName : "",
-            phoneNumber: typeof data.phoneNumber === "string" ? data.phoneNumber : "",
+            participantNameNormalized:
+              typeof data.participantNameNormalized === "string"
+                ? data.participantNameNormalized
+                : "",
+            branch,
+            phoneNumber:
+              typeof data.phoneNumber === "string" ? data.phoneNumber : undefined,
             attemptNumber:
               typeof data.attemptNumber === "number" ? data.attemptNumber : 1,
             answers: Array.isArray(data.answers)

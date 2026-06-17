@@ -1276,7 +1276,7 @@ function AssessmentResults({
     return submissions.filter(
       (s) =>
         s.participantName.toLowerCase().includes(q) ||
-        s.phoneNumber.toLowerCase().includes(q)
+        (s.branch ? s.branch.toLowerCase().includes(q) : false)
     );
   }, [submissions, search]);
 
@@ -1342,7 +1342,7 @@ function AssessmentResults({
 
       <div style={{ ...cardStyle(), padding: 16 }}>
         <input
-          placeholder="Search by name or phone…"
+          placeholder="Search by name or branch…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ ...inputStyle(), maxWidth: 340 }}
@@ -1363,7 +1363,7 @@ function AssessmentResults({
             <thead>
               <tr style={{ background: isDark ? "#0f172a" : "#f9fafb", color: theme.mutedText }}>
                 <th style={th}>Name</th>
-                <th style={th}>Phone</th>
+                <th style={th}>Branch</th>
                 <th style={th}>Attempt</th>
                 <th style={th}>Score</th>
                 <th style={th}>%</th>
@@ -1378,7 +1378,7 @@ function AssessmentResults({
                   <td style={td}>
                     <div style={{ fontWeight: 700, color: theme.title }}>{s.participantName}</div>
                   </td>
-                  <td style={td}>{s.phoneNumber}</td>
+                  <td style={td}>{s.branch || (s.phoneNumber ? `Legacy · ${s.phoneNumber}` : "—")}</td>
                   <td style={td}>{s.attemptNumber}</td>
                   <td style={td}>{s.score} / {s.totalQuestions}</td>
                   <td style={td}>{s.percentage}%</td>
@@ -1469,7 +1469,14 @@ function SubmissionDetail({
             gap: 10,
           }}
         >
-          <StatBox title="Participant" value={submission.participantName} hint={submission.phoneNumber} />
+          <StatBox
+            title="Participant"
+            value={submission.participantName}
+            hint={
+              submission.branch ||
+              (submission.phoneNumber ? `Legacy · ${submission.phoneNumber}` : "—")
+            }
+          />
           <StatBox title="Score" value={`${submission.score} / ${submission.totalQuestions}`} hint="correct answers" />
           <StatBox title="Percentage" value={`${submission.percentage}%`} hint={`Passing ${assessment?.passingPercentage ?? "—"}%`} />
           <StatBox title="Status" value={submission.status} hint={submission.status === "Pass" ? "Above passing mark" : "Below passing mark"} />
@@ -1581,6 +1588,9 @@ function buildSingleResultHtml(s: AssessmentSubmission, assessment: Assessment |
   const statusColor = s.status === "Pass" ? "#15803d" : "#b91c1c";
   const statusBg = s.status === "Pass" ? "#dcfce7" : "#fee2e2";
 
+  const branchDisplay =
+    s.branch || (s.phoneNumber ? `Legacy · ${s.phoneNumber}` : "—");
+
   return `<!doctype html><html><head><meta charset="utf-8"/>
 <title>Assessment Result — ${escHtml(s.participantName)}</title>
 <style>
@@ -1589,7 +1599,7 @@ function buildSingleResultHtml(s: AssessmentSubmission, assessment: Assessment |
   ${headerHtml(escHtml(s.assessmentTitle))}
   <div class="meta-grid">
     <div><div class="lbl">Participant</div><div class="val">${escHtml(s.participantName)}</div></div>
-    <div><div class="lbl">Phone</div><div class="val">${escHtml(s.phoneNumber)}</div></div>
+    <div><div class="lbl">Branch</div><div class="val">${escHtml(branchDisplay)}</div></div>
     <div><div class="lbl">Attempt</div><div class="val">${s.attemptNumber} of ${assessment?.maxAttempts ?? "—"}</div></div>
     <div><div class="lbl">Submitted</div><div class="val">${escHtml(fmtDateTime(s.submittedAt))}</div></div>
   </div>
@@ -1659,14 +1669,14 @@ function buildAllResultsHtml(assessment: Assessment, submissions: AssessmentSubm
   <h2 class="sec">All submissions</h2>
   <table class="tbl">
     <thead><tr>
-      <th>Name</th><th>Phone</th><th>Attempt</th><th>Score</th><th>%</th><th>Status</th><th>Submitted</th>
+      <th>Name</th><th>Branch</th><th>Attempt</th><th>Score</th><th>%</th><th>Status</th><th>Submitted</th>
     </tr></thead>
     <tbody>
       ${sorted
         .map(
           (s) => `<tr>
             <td>${escHtml(s.participantName)}</td>
-            <td>${escHtml(s.phoneNumber)}</td>
+            <td>${escHtml(s.branch || (s.phoneNumber ? `Legacy · ${s.phoneNumber}` : "—"))}</td>
             <td>${s.attemptNumber}</td>
             <td>${s.score} / ${s.totalQuestions}</td>
             <td>${s.percentage}%</td>

@@ -139,13 +139,16 @@ export type Assessment = {
 
 export type AssessmentSubmissionStatus = "Pass" | "Fail";
 
+export type AssessmentBranch = "PS Muraqqabat" | "PS Karama";
+
 export type AssessmentSubmission = {
   id: string;
   assessmentId: string;
   assessmentCode: string;
   assessmentTitle: string;
   participantName: string;
-  phoneNumber: string;
+  participantNameNormalized: string;
+  branch: AssessmentBranch | "";
   attemptNumber: number;
   answers: number[];
   correctAnswers: number[];
@@ -154,6 +157,9 @@ export type AssessmentSubmission = {
   percentage: number;
   status: AssessmentSubmissionStatus;
   submittedAt: string;
+  // Legacy: older submissions may still have phoneNumber. Kept optional so we
+  // don't crash when admin views historical data.
+  phoneNumber?: string;
 };
 
 export const COMPANY_NAME = "Emirates International Holdings Group";
