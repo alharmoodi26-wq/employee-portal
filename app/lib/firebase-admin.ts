@@ -3,6 +3,7 @@ import { getFirestore, type Firestore } from "firebase-admin/firestore";
 
 let cachedApp: App | null = null;
 let cachedDb: Firestore | null = null;
+let cachedProjectId = "";
 
 export class AdminInitError extends Error {
   constructor(public readonly kind: "env_missing" | "env_invalid", message: string) {
@@ -126,8 +127,12 @@ export function getAdminApp(): App {
   }
 
   const sa = loadServiceAccount();
+  cachedProjectId = (sa as { projectId?: string }).projectId || "";
   try {
-    cachedApp = initializeApp({ credential: cert(sa) });
+    cachedApp = initializeApp({
+      credential: cert(sa),
+      projectId: cachedProjectId || undefined,
+    });
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
     throw new AdminInitError(
@@ -151,9 +156,10 @@ export function getAdminDb(): Firestore {
  */
 export function diagnose(): { ok: true; projectId: string } | { ok: false; kind: string; message: string } {
   try {
-    getAdminApp();
     const app = getAdminApp();
-    return { ok: true, projectId: app.options.projectId || "(unknown)" };
+    const projectId =
+      cachedProjectId || app.options.projectId || "(unknown)";
+    return { ok: true, projectId };
   } catch (err) {
     if (err instanceof AdminInitError) {
       return { ok: false, kind: err.kind, message: err.message };
