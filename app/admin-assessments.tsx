@@ -21,7 +21,6 @@ import {
   SkeletonCard,
   softCardStyle,
   StatBox,
-  SYSTEM_NAME,
   ToastType,
 } from "./portal-utils";
 
@@ -1777,53 +1776,26 @@ function buildSingleResultHtml(
         correctAnswerIndex: c,
       }));
 
+  const statusColor = s.status === "Pass" ? "#15803d" : "#b91c1c";
+  const statusBg = s.status === "Pass" ? "#dcfce7" : "#fee2e2";
+
   const branchDisplay =
     s.branch || (s.phoneNumber ? `Legacy · ${s.phoneNumber}` : "—");
-
-  const passClass = s.status === "Pass" ? "status-pass" : "status-fail";
 
   return `<!doctype html><html><head><meta charset="utf-8"/>
 <title>Assessment Result — ${escHtml(s.participantName)}</title>
 <style>${printCss()}</style></head><body><div class="page">
-  ${officialHeaderHtml("Assessment Result Report")}
-
-  <h2 class="sec">Assessment Information</h2>
-  <table class="info">
-    <tr><th>Assessment Title</th><td>${escHtml(s.assessmentTitle)}</td></tr>
-    <tr><th>Assessment Code</th><td>${escHtml(s.assessmentCode || assessment?.code || "—")}</td></tr>
-    <tr><th>Passing Percentage</th><td>${assessment?.passingPercentage ?? "—"}%</td></tr>
-    <tr><th>Total Questions</th><td>${s.totalQuestions}</td></tr>
-    <tr><th>Submitted Date</th><td>${escHtml(fmtDateTime(s.submittedAt))}</td></tr>
-  </table>
-
-  <h2 class="sec">Participant Information</h2>
-  <table class="info">
-    <tr><th>Participant Name</th><td>${escHtml(s.participantName)}</td></tr>
-    <tr><th>Branch</th><td>${escHtml(branchDisplay)}</td></tr>
-    <tr><th>Attempt Number</th><td>${s.attemptNumber} of ${assessment?.maxAttempts ?? "—"}</td></tr>
-    <tr><th>Result Status</th><td><span class="status ${passClass}">${escHtml(s.status === "Pass" ? "PASS" : "FAIL")}</span></td></tr>
-    <tr><th>Score</th><td>${s.score} / ${s.totalQuestions}</td></tr>
-    <tr><th>Percentage</th><td>${s.percentage}%</td></tr>
-  </table>
-
-  <h2 class="sec">Result Summary</h2>
-  <div class="summary">
-    <div class="summary-row">
-      <div class="summary-cell">
-        <div class="summary-lbl">Score</div>
-        <div class="summary-val">${s.score} / ${s.totalQuestions}</div>
-      </div>
-      <div class="summary-cell">
-        <div class="summary-lbl">Percentage</div>
-        <div class="summary-val">${s.percentage}%</div>
-      </div>
-      <div class="summary-cell">
-        <div class="summary-lbl">Status</div>
-        <div class="summary-val ${passClass}">${escHtml(s.status === "Pass" ? "PASS" : "FAIL")}</div>
-      </div>
-    </div>
+  ${brandHeaderHtml(escHtml(s.assessmentTitle))}
+  <div class="meta-grid">
+    <div><div class="lbl">Participant</div><div class="val">${escHtml(s.participantName)}</div></div>
+    <div><div class="lbl">Branch</div><div class="val">${escHtml(branchDisplay)}</div></div>
+    <div><div class="lbl">Attempt</div><div class="val">${s.attemptNumber} of ${assessment?.maxAttempts ?? "—"}</div></div>
+    <div><div class="lbl">Submitted</div><div class="val">${escHtml(fmtDateTime(s.submittedAt))}</div></div>
   </div>
-
+  <div class="result-box" style="background:${statusBg};border-color:${statusColor};color:${statusColor}">
+    <div class="result-num">${s.score} / ${s.totalQuestions}  ·  ${s.percentage}%</div>
+    <div class="result-lbl">${escHtml(s.status)} (passing ${assessment?.passingPercentage ?? "—"}%)</div>
+  </div>
   <h2 class="sec">Questions and Answers</h2>
   ${questions
     .map((q, qIdx) => {
@@ -1838,19 +1810,26 @@ function buildSingleResultHtml(
         correct >= 0 && correct < q.options.length
           ? q.options[correct]
           : `Option ${correct + 1}`;
-      return `<div class="q">
+      return `<div class="q ${ok ? "q-ok" : "q-bad"}">
         <div class="q-num">Question ${qIdx + 1}</div>
         <div class="q-text">${escHtml(q.text)}</div>
-        <table class="qa">
-          <tr><th>Selected answer</th><td>${escHtml(selectedText)}</td></tr>
-          <tr><th>Correct answer</th><td>${escHtml(correctText)}</td></tr>
-          <tr><th>Result</th><td><span class="${ok ? "result-correct" : "result-wrong"}">${ok ? "Correct" : "Wrong"}</span></td></tr>
-        </table>
+        <div class="q-rows">
+          <div class="q-row">
+            <span class="q-lbl">Selected answer</span>
+            <span class="${ok ? "ans-ok" : "ans-bad"}">${escHtml(selectedText)}</span>
+          </div>
+          <div class="q-row">
+            <span class="q-lbl">Correct answer</span>
+            <span class="ans-ok">${escHtml(correctText)}</span>
+          </div>
+          <div class="q-row">
+            <span class="q-lbl">Result</span>
+            <span class="${ok ? "result-correct" : "result-wrong"}">${ok ? "Correct" : "Wrong"}</span>
+          </div>
+        </div>
       </div>`;
     })
     .join("")}
-
-  ${footerHtml()}
   ${printActionsHtml()}
 </div></body></html>`;
 }
@@ -1859,8 +1838,7 @@ function buildAllResultsHtml(
   assessment: Assessment,
   submissions: AssessmentSubmission[]
 ): string {
-  // Defense in depth: even though the caller already filters, exclude any
-  // soft-deleted submission here too.
+  // Defense in depth: caller already filters, but exclude soft-deleted here too.
   const live = submissions.filter((s) => s.deleted !== true);
   const sorted = [...live].sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : -1));
   const passes = sorted.filter((s) => s.status === "Pass").length;
@@ -1871,37 +1849,25 @@ function buildAllResultsHtml(
       : Math.round(sorted.reduce((sum, s) => sum + s.percentage, 0) / sorted.length);
 
   return `<!doctype html><html><head><meta charset="utf-8"/>
-<title>Assessment Summary — ${escHtml(assessment.title)}</title>
+<title>Assessment Results — ${escHtml(assessment.title)}</title>
 <style>${printCss()}</style></head><body><div class="page">
-  ${officialHeaderHtml("Assessment Summary Report")}
-
-  <h2 class="sec">Assessment Information</h2>
-  <table class="info">
-    <tr><th>Assessment Title</th><td>${escHtml(assessment.title)}</td></tr>
-    <tr><th>Assessment Code</th><td>${escHtml(assessment.code)}</td></tr>
-    <tr><th>Passing Percentage</th><td>${assessment.passingPercentage}%</td></tr>
-    <tr><th>Total Questions</th><td>${assessment.questions.length}</td></tr>
-    <tr><th>Max Attempts per Participant</th><td>${assessment.maxAttempts}</td></tr>
-  </table>
-
-  <h2 class="sec">Overall Summary</h2>
-  <table class="info">
-    <tr><th>Total Submissions</th><td>${sorted.length}</td></tr>
-    <tr><th>Passes</th><td>${passes}</td></tr>
-    <tr><th>Fails</th><td>${fails}</td></tr>
-    <tr><th>Average Percentage</th><td>${sorted.length ? avg + "%" : "—"}</td></tr>
-  </table>
-
-  <h2 class="sec">All Submissions</h2>
+  ${brandHeaderHtml(escHtml(assessment.title))}
+  <div class="meta-grid">
+    <div><div class="lbl">Code</div><div class="val">${escHtml(assessment.code)}</div></div>
+    <div><div class="lbl">Questions</div><div class="val">${assessment.questions.length}</div></div>
+    <div><div class="lbl">Passing</div><div class="val">${assessment.passingPercentage}%</div></div>
+    <div><div class="lbl">Max attempts</div><div class="val">${assessment.maxAttempts}</div></div>
+  </div>
+  <div class="summary-row">
+    <div class="stat"><div class="stat-lbl">Submissions</div><div class="stat-val">${sorted.length}</div></div>
+    <div class="stat"><div class="stat-lbl">Passes</div><div class="stat-val">${passes}</div></div>
+    <div class="stat"><div class="stat-lbl">Fails</div><div class="stat-val">${fails}</div></div>
+    <div class="stat"><div class="stat-lbl">Average</div><div class="stat-val">${sorted.length ? avg + "%" : "—"}</div></div>
+  </div>
+  <h2 class="sec">All submissions</h2>
   <table class="tbl">
     <thead><tr>
-      <th>Participant Name</th>
-      <th>Branch</th>
-      <th>Attempt</th>
-      <th>Score</th>
-      <th>%</th>
-      <th>Status</th>
-      <th>Submitted</th>
+      <th>Name</th><th>Branch</th><th>Attempt</th><th>Score</th><th>%</th><th>Status</th><th>Submitted</th>
     </tr></thead>
     <tbody>
       ${sorted
@@ -1912,51 +1878,33 @@ function buildAllResultsHtml(
             <td>${s.attemptNumber}</td>
             <td>${s.score} / ${s.totalQuestions}</td>
             <td>${s.percentage}%</td>
-            <td><span class="status ${s.status === "Pass" ? "status-pass" : "status-fail"}">${escHtml(s.status === "Pass" ? "PASS" : "FAIL")}</span></td>
+            <td><span class="badge ${s.status === "Pass" ? "badge-pass" : "badge-fail"}">${escHtml(s.status)}</span></td>
             <td>${escHtml(fmtDateTime(s.submittedAt))}</td>
           </tr>`
         )
         .join("")}
     </tbody>
   </table>
-
-  ${footerHtml()}
   ${printActionsHtml()}
 </div></body></html>`;
 }
 
-function officialHeaderHtml(reportTitle: string): string {
-  return `<header class="report-hdr">
-    <div class="brand-block">
-      <div class="brand-mark">PS</div>
-      <div>
-        <div class="brand-name">Philippine Supermarket</div>
-        <div class="brand-sub">A Project of ${escHtml(COMPANY_NAME)}</div>
-      </div>
+function brandHeaderHtml(rightTitle: string): string {
+  // Brand order: Emirates International Holdings Group (top, larger) →
+  // Philippine Supermarket (smaller, italic, below). Same colorful layout
+  // as the previous report design — only the brand text was rearranged.
+  return `<div class="hdr">
+    <div class="brand">
+      <div class="brand-name">${escHtml(COMPANY_NAME)}</div>
+      <div class="brand-sub">Philippine Supermarket</div>
     </div>
-    <h1 class="report-title">${escHtml(reportTitle)}</h1>
-    <div class="report-date">Issued: ${escHtml(
-      new Date().toLocaleString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    )}</div>
-  </header>`;
-}
-
-function footerHtml(): string {
-  return `<footer class="report-ftr">
-    <div>Philippine Supermarket — A Project of ${escHtml(COMPANY_NAME)}</div>
-    <div>Document generated by ${escHtml(SYSTEM_NAME)}</div>
-  </footer>`;
+    <div class="doc-title">${rightTitle}</div>
+  </div>`;
 }
 
 function printActionsHtml(): string {
-  return `<div class="no-print" style="margin-top:24px;text-align:right">
-    <button onclick="window.print()" style="padding:10px 16px;border:none;border-radius:10px;background:#111827;color:#fff;font-weight:700;cursor:pointer">🖨️ Print</button>
+  return `<div class="no-print" style="margin-top:20px;text-align:right">
+    <button onclick="window.print()" style="padding:10px 16px;border:none;border-radius:10px;background:#4338ca;color:#fff;font-weight:700;cursor:pointer">🖨️ Print</button>
     <button onclick="window.close()" style="padding:10px 16px;border:1px solid #d1d5db;border-radius:10px;background:#fff;color:#111827;font-weight:600;cursor:pointer;margin-left:8px">Close</button>
   </div>`;
 }
@@ -1964,53 +1912,45 @@ function printActionsHtml(): string {
 function printCss(): string {
   return `
     *{box-sizing:border-box}
-    html,body{margin:0;padding:0}
-    body{font-family:"Times New Roman",Georgia,serif;background:#f3f4f6;color:#111827;padding:24px;line-height:1.55}
-    .page{max-width:820px;margin:0 auto;background:#fff;padding:48px 52px;box-shadow:0 4px 12px rgba(15,23,42,0.08)}
-
-    .report-hdr{border-bottom:2px solid #111827;padding-bottom:14px;margin-bottom:24px}
-    .brand-block{display:flex;align-items:center;gap:14px}
-    .brand-mark{width:54px;height:54px;border:2px solid #111827;border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;font-weight:900;font-size:20px;letter-spacing:0.05em}
-    .brand-name{font-size:20px;font-weight:900;letter-spacing:0.01em}
-    .brand-sub{font-size:12px;color:#4b5563;font-style:italic;margin-top:2px}
-    .report-title{font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;margin:18px 0 4px;color:#111827}
-    .report-date{font-size:11px;color:#6b7280;letter-spacing:0.04em;text-transform:uppercase}
-
-    .sec{font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;color:#111827;border-bottom:1px solid #d1d5db;padding-bottom:6px;margin:24px 0 12px}
-
-    .info{width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:6px}
-    .info th{text-align:left;padding:6px 12px 6px 0;font-weight:700;color:#374151;width:38%;vertical-align:top;border-bottom:1px solid #f3f4f6}
-    .info td{padding:6px 0;color:#111827;font-weight:600;border-bottom:1px solid #f3f4f6;word-break:break-word}
-    .info tr:last-child th,.info tr:last-child td{border-bottom:none}
-
-    .summary{border:1px solid #111827;padding:14px 18px;margin-bottom:6px}
-    .summary-row{display:flex;justify-content:space-between;gap:24px}
-    .summary-cell{text-align:center;flex:1}
-    .summary-lbl{font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#4b5563;font-weight:700}
-    .summary-val{font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:900;color:#111827;margin-top:4px}
-    .summary-val.status-pass,.status.status-pass{color:#15803d}
-    .summary-val.status-fail,.status.status-fail{color:#b91c1c}
-    .status{display:inline-block;padding:2px 9px;border:1.5px solid currentColor;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:900;letter-spacing:0.08em}
-
-    .q{border:1px solid #d1d5db;padding:12px 16px;margin-bottom:10px;page-break-inside:avoid;break-inside:avoid}
-    .q-num{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;font-weight:800;letter-spacing:0.06em;text-transform:uppercase}
-    .q-text{font-size:14.5px;font-weight:700;color:#111827;margin:4px 0 8px;line-height:1.45}
-    .qa{width:100%;border-collapse:collapse;font-size:13px}
-    .qa th{width:30%;text-align:left;padding:4px 12px 4px 0;color:#4b5563;font-weight:600;vertical-align:top}
-    .qa td{padding:4px 0;color:#111827;font-weight:600;word-break:break-word}
-    .result-correct{font-family:Arial,Helvetica,sans-serif;color:#15803d;font-weight:900;letter-spacing:0.04em;text-transform:uppercase}
-    .result-wrong{font-family:Arial,Helvetica,sans-serif;color:#b91c1c;font-weight:900;letter-spacing:0.04em;text-transform:uppercase}
-
-    .tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
-    .tbl th,.tbl td{padding:6px 8px;text-align:left;border:1px solid #d1d5db}
-    .tbl th{background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#111827;font-weight:800}
-
-    .report-ftr{margin-top:32px;padding-top:12px;border-top:1px solid #d1d5db;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#6b7280;font-style:italic}
-
+    body{font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:#f8fafc;color:#111827;margin:0;padding:24px}
+    .page{max-width:880px;margin:0 auto;background:#fff;border-radius:14px;padding:32px;box-shadow:0 4px 12px rgba(15,23,42,0.08)}
+    .hdr{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;border-bottom:2px solid #e5e7eb;padding-bottom:14px;margin-bottom:18px;flex-wrap:wrap}
+    .brand-name{font-size:18px;font-weight:900;color:#111827;letter-spacing:-0.01em}
+    .brand-sub{font-size:13px;color:#4338ca;font-weight:700;margin-top:3px;font-style:italic}
+    .doc-title{font-size:20px;font-weight:900;color:#4338ca}
+    .meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;background:#f9fafb;padding:14px;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:16px}
+    .lbl{font-size:11px;color:#6b7280;font-weight:700;letter-spacing:0.04em;text-transform:uppercase}
+    .val{font-size:14px;color:#111827;font-weight:700;margin-top:2px;word-break:break-word}
+    .result-box{padding:18px;border-radius:14px;border:2px solid;margin-bottom:18px;text-align:center}
+    .result-num{font-size:28px;font-weight:900;letter-spacing:-0.02em}
+    .result-lbl{font-size:13px;font-weight:700;margin-top:4px}
+    .summary-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px}
+    .stat{background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:14px}
+    .stat-lbl{font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase}
+    .stat-val{font-size:22px;font-weight:900;color:#111827;margin-top:4px}
+    .sec{font-size:16px;font-weight:800;color:#111827;margin:18px 0 10px}
+    .q{background:#f9fafb;border:1px solid #e5e7eb;border-left:4px solid #9ca3af;border-radius:10px;padding:12px;margin-bottom:10px;page-break-inside:avoid;break-inside:avoid}
+    .q-ok{border-left-color:#10b981}
+    .q-bad{border-left-color:#ef4444}
+    .q-num{font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase}
+    .q-text{font-size:14px;font-weight:700;color:#111827;margin-top:4px;line-height:1.5}
+    .q-rows{display:grid;gap:6px;margin-top:10px}
+    .q-row{display:flex;gap:8px;align-items:center;font-size:13px;flex-wrap:wrap}
+    .q-lbl{font-weight:700;color:#6b7280;min-width:130px;font-size:12px;text-transform:uppercase;letter-spacing:0.04em}
+    .ans-ok{display:inline-block;padding:3px 10px;border-radius:8px;background:#dcfce7;color:#166534;border:1px solid #86efac;font-weight:700}
+    .ans-bad{display:inline-block;padding:3px 10px;border-radius:8px;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;font-weight:700}
+    .result-correct{display:inline-block;padding:3px 12px;border-radius:999px;background:#dcfce7;color:#166534;border:1px solid #86efac;font-weight:800;font-size:12px;letter-spacing:0.04em}
+    .result-wrong{display:inline-block;padding:3px 12px;border-radius:999px;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;font-weight:800;font-size:12px;letter-spacing:0.04em}
+    .tbl{width:100%;border-collapse:collapse;font-size:13px}
+    .tbl th,.tbl td{padding:8px 10px;text-align:left;border-bottom:1px solid #e5e7eb}
+    .tbl th{background:#f9fafb;font-weight:800;color:#374151}
+    .badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:800}
+    .badge-pass{background:#dcfce7;color:#166534}
+    .badge-fail{background:#fee2e2;color:#991b1b}
     @page{size:A4;margin:14mm}
     @media print{
       body{background:#fff;padding:0}
-      .page{box-shadow:none;padding:0;max-width:none}
+      .page{box-shadow:none;border-radius:0;padding:18px}
       .no-print{display:none!important}
       .q{page-break-inside:avoid;break-inside:avoid}
       .tbl tr{page-break-inside:avoid;break-inside:avoid}
