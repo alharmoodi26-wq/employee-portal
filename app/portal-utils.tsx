@@ -160,6 +160,12 @@ export type AssessmentSubmission = {
   // Legacy: older submissions may still have phoneNumber. Kept optional so we
   // don't crash when admin views historical data.
   phoneNumber?: string;
+  // Soft-delete fields. Deleted submissions are hidden from Results, print,
+  // stats, and the public attempt count.
+  deleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByName?: string;
 };
 
 export const COMPANY_NAME = "Emirates International Holdings Group";

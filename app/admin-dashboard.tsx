@@ -207,6 +207,7 @@ type AdminDashboardProps = {
   onUpdateAssessment?: (id: string, draft: AssessmentDraft) => Promise<void>;
   onDeleteAssessment?: (id: string, title: string) => void;
   onToggleAssessmentActive?: (id: string, nextActive: boolean) => Promise<void>;
+  onSoftDeleteSubmission?: (submissionId: string) => Promise<void>;
   showToast: (type: ToastType, message: string) => void;
 };
 
@@ -853,6 +854,7 @@ export default function AdminDashboard({
   onUpdateAssessment,
   onDeleteAssessment,
   onToggleAssessmentActive,
+  onSoftDeleteSubmission,
   showToast,
 }: AdminDashboardProps) {
   const theme = getThemePalette();
@@ -4061,6 +4063,12 @@ export default function AdminDashboard({
                 throw new Error("Assessment status update is not wired up.");
               }
               return onToggleAssessmentActive(id, nextActive);
+            }}
+            onSoftDeleteSubmission={async (submissionId) => {
+              if (!onSoftDeleteSubmission) {
+                throw new Error("Submission delete is not wired up.");
+              }
+              return onSoftDeleteSubmission(submissionId);
             }}
             showToast={showToast}
           />

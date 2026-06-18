@@ -103,18 +103,19 @@ export async function POST(req: NextRequest) {
 
     const nameNormalized = normalizeName(participantName);
 
-    // Re-check attempts atomically right before insert. With concurrent tabs the
-    // total could exceed maxAttempts by 1 in the worst case, but admin can spot
-    // duplicates by name + branch + submittedAt.
-    const aggregate = await db
+    // Re-check attempts right before insert. Subtract soft-deleted so an admin
+    // who removed a bad submission gives the participant their slot back.
+    const baseQuery = db
       .collection("assessmentSubmissions")
       .where("assessmentId", "==", assessmentId)
       .where("participantNameNormalized", "==", nameNormalized)
-      .where("branch", "==", branch)
-      .count()
-      .get();
+      .where("branch", "==", branch);
+    const [totalAgg, deletedAgg] = await Promise.all([
+      baseQuery.count().get(),
+      baseQuery.where("deleted", "==", true).count().get(),
+    ]);
 
-    const used = aggregate.data().count;
+    const used = Math.max(0, totalAgg.data().count - deletedAgg.data().count);
     if (used >= maxAttempts) {
       return NextResponse.json(
         {
@@ -151,6 +152,7 @@ export async function POST(req: NextRequest) {
       percentage,
       status,
       submittedAt: FieldValue.serverTimestamp(),
+      deleted: false,
     };
 
     const newRef = await db.collection("assessmentSubmissions").add(submissionDoc);

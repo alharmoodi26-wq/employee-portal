@@ -54,6 +54,7 @@ export type AdminAssessmentsProps = {
   onUpdateAssessment: (id: string, draft: AssessmentDraft) => Promise<void>;
   onDeleteAssessment: (id: string, title: string) => void;
   onToggleAssessmentActive: (id: string, nextActive: boolean) => Promise<void>;
+  onSoftDeleteSubmission: (submissionId: string) => Promise<void>;
   showToast: (type: ToastType, message: string) => void;
 };
 
@@ -93,15 +94,22 @@ function fmtDateTime(value: string): string {
 
 export default function AdminAssessments({
   assessments,
-  submissions,
+  submissions: rawSubmissions,
   loadingAssessments,
   loadingSubmissions,
   onCreateAssessment,
   onUpdateAssessment,
   onDeleteAssessment,
   onToggleAssessmentActive,
+  onSoftDeleteSubmission,
   showToast,
 }: AdminAssessmentsProps) {
+  // Single point of truth: anything deleted is hidden from results, stats, and
+  // print everywhere it matters.
+  const submissions = useMemo(
+    () => rawSubmissions.filter((s) => s.deleted !== true),
+    [rawSubmissions]
+  );
   const theme = getThemePalette();
   const isDark = getThemeMode() === "dark";
 
@@ -394,6 +402,8 @@ export default function AdminAssessments({
         loading={loadingSubmissions}
         onBack={() => setView({ type: "list" })}
         onOpenSubmission={(id) => setView({ type: "submission", submissionId: id })}
+        onSoftDeleteSubmission={onSoftDeleteSubmission}
+        showToast={showToast}
       />
     );
   }
@@ -1259,16 +1269,45 @@ function AssessmentResults({
   loading,
   onBack,
   onOpenSubmission,
+  onSoftDeleteSubmission,
+  showToast,
 }: {
   assessment: Assessment | undefined;
   submissions: AssessmentSubmission[];
   loading: boolean;
   onBack: () => void;
   onOpenSubmission: (id: string) => void;
+  onSoftDeleteSubmission: (submissionId: string) => Promise<void>;
+  showToast: (type: ToastType, message: string) => void;
 }) {
   const theme = getThemePalette();
   const isDark = getThemeMode() === "dark";
   const [search, setSearch] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<AssessmentSubmission | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await onSoftDeleteSubmission(deleteTarget.id);
+      showToast("success", "Result deleted successfully.");
+      setDeleteTarget(null);
+    } catch (err) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : "";
+      if (/permission|insufficient|denied/i.test(msg)) {
+        showToast(
+          "error",
+          "You don't have permission to delete this result. Contact the admin."
+        );
+      } else {
+        showToast("error", msg || "Could not delete the result.");
+      }
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1404,9 +1443,17 @@ function AssessmentResults({
                   </td>
                   <td style={td}>{fmtDateTime(s.submittedAt)}</td>
                   <td style={td}>
-                    <button style={smallButtonStyle()} onClick={() => onOpenSubmission(s.id)}>
-                      View
-                    </button>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button style={smallButtonStyle()} onClick={() => onOpenSubmission(s.id)}>
+                        View
+                      </button>
+                      <button
+                        style={dangerButtonStyle()}
+                        onClick={() => setDeleteTarget(s)}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1414,6 +1461,148 @@ function AssessmentResults({
           </table>
         </div>
       )}
+
+      {deleteTarget && (
+        <DeleteSubmissionModal
+          submission={deleteTarget}
+          assessment={assessment}
+          deleting={deleting}
+          onClose={() => {
+            if (!deleting) setDeleteTarget(null);
+          }}
+          onConfirm={handleConfirmDelete}
+        />
+      )}
+    </div>
+  );
+}
+
+function DeleteSubmissionModal({
+  submission,
+  assessment,
+  deleting,
+  onClose,
+  onConfirm,
+}: {
+  submission: AssessmentSubmission;
+  assessment: Assessment;
+  deleting: boolean;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const theme = getThemePalette();
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: theme.modalOverlay,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 2600,
+        padding: 16,
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          ...cardStyle(),
+          width: "100%",
+          maxWidth: 520,
+          padding: 24,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ fontSize: 20, fontWeight: 900, color: theme.title, marginBottom: 6 }}>
+          Delete result
+        </div>
+        <p style={{ fontSize: 13, color: theme.subtleText, lineHeight: 1.7, margin: 0 }}>
+          Are you sure you want to delete this result? This action cannot be undone.
+        </p>
+
+        <div
+          style={{
+            marginTop: 14,
+            background: theme.fileCardBg,
+            border: `1px solid ${theme.fileCardBorder}`,
+            borderRadius: 12,
+            padding: 14,
+            display: "grid",
+            gap: 8,
+            fontSize: 13,
+          }}
+        >
+          <Row k="Participant" v={submission.participantName} />
+          <Row
+            k="Branch"
+            v={submission.branch || (submission.phoneNumber ? `Legacy · ${submission.phoneNumber}` : "—")}
+          />
+          <Row k="Assessment" v={assessment.title} />
+          <Row k="Attempt" v={`${submission.attemptNumber} of ${assessment.maxAttempts}`} />
+          <Row
+            k="Score"
+            v={`${submission.score} / ${submission.totalQuestions} · ${submission.percentage}% · ${submission.status}`}
+          />
+          <Row k="Submitted" v={fmtDateTime(submission.submittedAt)} />
+        </div>
+
+        <div
+          style={{
+            marginTop: 10,
+            padding: "8px 12px",
+            borderRadius: 10,
+            background: "rgba(245,158,11,0.08)",
+            border: "1px solid rgba(245,158,11,0.3)",
+            color: "#92400e",
+            fontSize: 12,
+            fontWeight: 600,
+            lineHeight: 1.6,
+          }}
+        >
+          ℹ️ Deleting this result frees up one attempt for the participant if they were at the cap.
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            marginTop: 18,
+            justifyContent: "flex-end",
+            flexWrap: "wrap",
+          }}
+        >
+          <button style={smallButtonStyle()} onClick={onClose} disabled={deleting}>
+            Cancel
+          </button>
+          <button
+            style={{
+              ...dangerButtonStyle(),
+              padding: "10px 16px",
+              fontWeight: 800,
+              fontSize: 14,
+            }}
+            onClick={onConfirm}
+            disabled={deleting}
+          >
+            {deleting ? "Deleting…" : "Confirm delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  const theme = getThemePalette();
+  return (
+    <div style={{ display: "flex", gap: 10, justifyContent: "space-between" }}>
+      <div style={{ fontSize: 11, color: theme.subtleText, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        {k}
+      </div>
+      <div style={{ fontSize: 13, color: theme.title, fontWeight: 700, textAlign: "right", maxWidth: "70%", wordBreak: "break-word" }}>
+        {v}
+      </div>
     </div>
   );
 }
@@ -1575,7 +1764,10 @@ function openPrintWindow(html: string) {
   win.document.close();
 }
 
-function buildSingleResultHtml(s: AssessmentSubmission, assessment: Assessment | undefined): string {
+function buildSingleResultHtml(
+  s: AssessmentSubmission,
+  assessment: Assessment | undefined
+): string {
   const questions: AssessmentQuestion[] = assessment
     ? assessment.questions
     : s.correctAnswers.map((c, i) => ({
@@ -1585,64 +1777,92 @@ function buildSingleResultHtml(s: AssessmentSubmission, assessment: Assessment |
         correctAnswerIndex: c,
       }));
 
-  const statusColor = s.status === "Pass" ? "#15803d" : "#b91c1c";
-  const statusBg = s.status === "Pass" ? "#dcfce7" : "#fee2e2";
-
   const branchDisplay =
     s.branch || (s.phoneNumber ? `Legacy · ${s.phoneNumber}` : "—");
 
+  const passClass = s.status === "Pass" ? "status-pass" : "status-fail";
+
   return `<!doctype html><html><head><meta charset="utf-8"/>
 <title>Assessment Result — ${escHtml(s.participantName)}</title>
-<style>
-  ${printCss()}
-</style></head><body><div class="page">
-  ${headerHtml(escHtml(s.assessmentTitle))}
-  <div class="meta-grid">
-    <div><div class="lbl">Participant</div><div class="val">${escHtml(s.participantName)}</div></div>
-    <div><div class="lbl">Branch</div><div class="val">${escHtml(branchDisplay)}</div></div>
-    <div><div class="lbl">Attempt</div><div class="val">${s.attemptNumber} of ${assessment?.maxAttempts ?? "—"}</div></div>
-    <div><div class="lbl">Submitted</div><div class="val">${escHtml(fmtDateTime(s.submittedAt))}</div></div>
+<style>${printCss()}</style></head><body><div class="page">
+  ${officialHeaderHtml("Assessment Result Report")}
+
+  <h2 class="sec">Assessment Information</h2>
+  <table class="info">
+    <tr><th>Assessment Title</th><td>${escHtml(s.assessmentTitle)}</td></tr>
+    <tr><th>Assessment Code</th><td>${escHtml(s.assessmentCode || assessment?.code || "—")}</td></tr>
+    <tr><th>Passing Percentage</th><td>${assessment?.passingPercentage ?? "—"}%</td></tr>
+    <tr><th>Total Questions</th><td>${s.totalQuestions}</td></tr>
+    <tr><th>Submitted Date</th><td>${escHtml(fmtDateTime(s.submittedAt))}</td></tr>
+  </table>
+
+  <h2 class="sec">Participant Information</h2>
+  <table class="info">
+    <tr><th>Participant Name</th><td>${escHtml(s.participantName)}</td></tr>
+    <tr><th>Branch</th><td>${escHtml(branchDisplay)}</td></tr>
+    <tr><th>Attempt Number</th><td>${s.attemptNumber} of ${assessment?.maxAttempts ?? "—"}</td></tr>
+    <tr><th>Result Status</th><td><span class="status ${passClass}">${escHtml(s.status === "Pass" ? "PASS" : "FAIL")}</span></td></tr>
+    <tr><th>Score</th><td>${s.score} / ${s.totalQuestions}</td></tr>
+    <tr><th>Percentage</th><td>${s.percentage}%</td></tr>
+  </table>
+
+  <h2 class="sec">Result Summary</h2>
+  <div class="summary">
+    <div class="summary-row">
+      <div class="summary-cell">
+        <div class="summary-lbl">Score</div>
+        <div class="summary-val">${s.score} / ${s.totalQuestions}</div>
+      </div>
+      <div class="summary-cell">
+        <div class="summary-lbl">Percentage</div>
+        <div class="summary-val">${s.percentage}%</div>
+      </div>
+      <div class="summary-cell">
+        <div class="summary-lbl">Status</div>
+        <div class="summary-val ${passClass}">${escHtml(s.status === "Pass" ? "PASS" : "FAIL")}</div>
+      </div>
+    </div>
   </div>
-  <div class="result-box" style="background:${statusBg};border-color:${statusColor};color:${statusColor}">
-    <div class="result-num">${s.score} / ${s.totalQuestions}  ·  ${s.percentage}%</div>
-    <div class="result-lbl">${escHtml(s.status)} (passing ${assessment?.passingPercentage ?? "—"}%)</div>
-  </div>
-  <h2 class="sec">Answers</h2>
+
+  <h2 class="sec">Questions and Answers</h2>
   ${questions
     .map((q, qIdx) => {
       const chosen = s.answers[qIdx];
       const correct = q.correctAnswerIndex;
       const ok = chosen === correct;
-      const optsHtml =
-        q.options.length > 0
-          ? q.options
-              .map((opt, oIdx) => {
-                const isChosen = oIdx === chosen;
-                const isCorrect = oIdx === correct;
-                let cls = "opt";
-                if (isCorrect) cls += " opt-correct";
-                if (isChosen && !isCorrect) cls += " opt-wrong";
-                let suffix = "";
-                if (isCorrect && isChosen) suffix = " (their answer · correct)";
-                else if (isCorrect) suffix = " (correct answer)";
-                else if (isChosen) suffix = " (their answer)";
-                return `<div class="${cls}">${escHtml(opt)}<span class="suffix">${escHtml(suffix)}</span></div>`;
-              })
-              .join("")
-          : `<div class="opt">Their answer: option ${chosen + 1} · Correct: option ${correct + 1}</div>`;
-      return `<div class="q ${ok ? "q-ok" : "q-bad"}">
-        <div class="q-num">Question ${qIdx + 1} · ${ok ? "Correct" : "Incorrect"}</div>
+      const selectedText =
+        chosen >= 0 && chosen < q.options.length
+          ? q.options[chosen]
+          : `Option ${chosen + 1}`;
+      const correctText =
+        correct >= 0 && correct < q.options.length
+          ? q.options[correct]
+          : `Option ${correct + 1}`;
+      return `<div class="q">
+        <div class="q-num">Question ${qIdx + 1}</div>
         <div class="q-text">${escHtml(q.text)}</div>
-        <div class="opts">${optsHtml}</div>
+        <table class="qa">
+          <tr><th>Selected answer</th><td>${escHtml(selectedText)}</td></tr>
+          <tr><th>Correct answer</th><td>${escHtml(correctText)}</td></tr>
+          <tr><th>Result</th><td><span class="${ok ? "result-correct" : "result-wrong"}">${ok ? "Correct" : "Wrong"}</span></td></tr>
+        </table>
       </div>`;
     })
     .join("")}
+
+  ${footerHtml()}
   ${printActionsHtml()}
 </div></body></html>`;
 }
 
-function buildAllResultsHtml(assessment: Assessment, submissions: AssessmentSubmission[]): string {
-  const sorted = [...submissions].sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : -1));
+function buildAllResultsHtml(
+  assessment: Assessment,
+  submissions: AssessmentSubmission[]
+): string {
+  // Defense in depth: even though the caller already filters, exclude any
+  // soft-deleted submission here too.
+  const live = submissions.filter((s) => s.deleted !== true);
+  const sorted = [...live].sort((a, b) => (a.submittedAt < b.submittedAt ? 1 : -1));
   const passes = sorted.filter((s) => s.status === "Pass").length;
   const fails = sorted.length - passes;
   const avg =
@@ -1651,25 +1871,37 @@ function buildAllResultsHtml(assessment: Assessment, submissions: AssessmentSubm
       : Math.round(sorted.reduce((sum, s) => sum + s.percentage, 0) / sorted.length);
 
   return `<!doctype html><html><head><meta charset="utf-8"/>
-<title>Assessment Results — ${escHtml(assessment.title)}</title>
+<title>Assessment Summary — ${escHtml(assessment.title)}</title>
 <style>${printCss()}</style></head><body><div class="page">
-  ${headerHtml(escHtml(assessment.title))}
-  <div class="meta-grid">
-    <div><div class="lbl">Code</div><div class="val">${escHtml(assessment.code)}</div></div>
-    <div><div class="lbl">Questions</div><div class="val">${assessment.questions.length}</div></div>
-    <div><div class="lbl">Passing</div><div class="val">${assessment.passingPercentage}%</div></div>
-    <div><div class="lbl">Max attempts</div><div class="val">${assessment.maxAttempts}</div></div>
-  </div>
-  <div class="summary-row">
-    <div class="stat"><div class="stat-lbl">Submissions</div><div class="stat-val">${sorted.length}</div></div>
-    <div class="stat"><div class="stat-lbl">Passes</div><div class="stat-val">${passes}</div></div>
-    <div class="stat"><div class="stat-lbl">Fails</div><div class="stat-val">${fails}</div></div>
-    <div class="stat"><div class="stat-lbl">Average</div><div class="stat-val">${sorted.length ? avg + "%" : "—"}</div></div>
-  </div>
-  <h2 class="sec">All submissions</h2>
+  ${officialHeaderHtml("Assessment Summary Report")}
+
+  <h2 class="sec">Assessment Information</h2>
+  <table class="info">
+    <tr><th>Assessment Title</th><td>${escHtml(assessment.title)}</td></tr>
+    <tr><th>Assessment Code</th><td>${escHtml(assessment.code)}</td></tr>
+    <tr><th>Passing Percentage</th><td>${assessment.passingPercentage}%</td></tr>
+    <tr><th>Total Questions</th><td>${assessment.questions.length}</td></tr>
+    <tr><th>Max Attempts per Participant</th><td>${assessment.maxAttempts}</td></tr>
+  </table>
+
+  <h2 class="sec">Overall Summary</h2>
+  <table class="info">
+    <tr><th>Total Submissions</th><td>${sorted.length}</td></tr>
+    <tr><th>Passes</th><td>${passes}</td></tr>
+    <tr><th>Fails</th><td>${fails}</td></tr>
+    <tr><th>Average Percentage</th><td>${sorted.length ? avg + "%" : "—"}</td></tr>
+  </table>
+
+  <h2 class="sec">All Submissions</h2>
   <table class="tbl">
     <thead><tr>
-      <th>Name</th><th>Branch</th><th>Attempt</th><th>Score</th><th>%</th><th>Status</th><th>Submitted</th>
+      <th>Participant Name</th>
+      <th>Branch</th>
+      <th>Attempt</th>
+      <th>Score</th>
+      <th>%</th>
+      <th>Status</th>
+      <th>Submitted</th>
     </tr></thead>
     <tbody>
       ${sorted
@@ -1680,30 +1912,51 @@ function buildAllResultsHtml(assessment: Assessment, submissions: AssessmentSubm
             <td>${s.attemptNumber}</td>
             <td>${s.score} / ${s.totalQuestions}</td>
             <td>${s.percentage}%</td>
-            <td><span class="badge ${s.status === "Pass" ? "badge-pass" : "badge-fail"}">${escHtml(s.status)}</span></td>
+            <td><span class="status ${s.status === "Pass" ? "status-pass" : "status-fail"}">${escHtml(s.status === "Pass" ? "PASS" : "FAIL")}</span></td>
             <td>${escHtml(fmtDateTime(s.submittedAt))}</td>
           </tr>`
         )
         .join("")}
     </tbody>
   </table>
+
+  ${footerHtml()}
   ${printActionsHtml()}
 </div></body></html>`;
 }
 
-function headerHtml(title: string): string {
-  return `<div class="hdr">
-    <div class="brand">
-      <div class="brand-name">${escHtml(COMPANY_NAME)}</div>
-      <div class="brand-sub">${escHtml(SYSTEM_NAME)}</div>
+function officialHeaderHtml(reportTitle: string): string {
+  return `<header class="report-hdr">
+    <div class="brand-block">
+      <div class="brand-mark">PS</div>
+      <div>
+        <div class="brand-name">Philippine Supermarket</div>
+        <div class="brand-sub">A Project of ${escHtml(COMPANY_NAME)}</div>
+      </div>
     </div>
-    <div class="doc-title">${title}</div>
-  </div>`;
+    <h1 class="report-title">${escHtml(reportTitle)}</h1>
+    <div class="report-date">Issued: ${escHtml(
+      new Date().toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    )}</div>
+  </header>`;
+}
+
+function footerHtml(): string {
+  return `<footer class="report-ftr">
+    <div>Philippine Supermarket — A Project of ${escHtml(COMPANY_NAME)}</div>
+    <div>Document generated by ${escHtml(SYSTEM_NAME)}</div>
+  </footer>`;
 }
 
 function printActionsHtml(): string {
-  return `<div class="no-print" style="margin-top:20px;text-align:right">
-    <button onclick="window.print()" style="padding:10px 16px;border:none;border-radius:10px;background:#4338ca;color:#fff;font-weight:700;cursor:pointer">🖨️ Print</button>
+  return `<div class="no-print" style="margin-top:24px;text-align:right">
+    <button onclick="window.print()" style="padding:10px 16px;border:none;border-radius:10px;background:#111827;color:#fff;font-weight:700;cursor:pointer">🖨️ Print</button>
     <button onclick="window.close()" style="padding:10px 16px;border:1px solid #d1d5db;border-radius:10px;background:#fff;color:#111827;font-weight:600;cursor:pointer;margin-left:8px">Close</button>
   </div>`;
 }
@@ -1711,43 +1964,56 @@ function printActionsHtml(): string {
 function printCss(): string {
   return `
     *{box-sizing:border-box}
-    body{font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif;background:#f8fafc;color:#111827;margin:0;padding:24px}
-    .page{max-width:880px;margin:0 auto;background:#fff;border-radius:14px;padding:32px;box-shadow:0 4px 12px rgba(15,23,42,0.08)}
-    .hdr{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;border-bottom:2px solid #e5e7eb;padding-bottom:14px;margin-bottom:18px;flex-wrap:wrap}
-    .brand-name{font-size:18px;font-weight:900;color:#111827}
-    .brand-sub{font-size:12px;color:#6b7280;font-weight:600;margin-top:2px}
-    .doc-title{font-size:20px;font-weight:900;color:#4338ca}
-    .meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;background:#f9fafb;padding:14px;border:1px solid #e5e7eb;border-radius:12px;margin-bottom:16px}
-    .lbl{font-size:11px;color:#6b7280;font-weight:700;letter-spacing:0.04em;text-transform:uppercase}
-    .val{font-size:14px;color:#111827;font-weight:700;margin-top:2px;word-break:break-word}
-    .result-box{padding:18px;border-radius:14px;border:2px solid;margin-bottom:18px;text-align:center}
-    .result-num{font-size:28px;font-weight:900;letter-spacing:-0.02em}
-    .result-lbl{font-size:13px;font-weight:700;margin-top:4px}
-    .summary-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:18px}
-    .stat{background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:14px}
-    .stat-lbl{font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase}
-    .stat-val{font-size:22px;font-weight:900;color:#111827;margin-top:4px}
-    .sec{font-size:16px;font-weight:800;color:#111827;margin:18px 0 10px}
-    .q{background:#f9fafb;border:1px solid #e5e7eb;border-left:4px solid #9ca3af;border-radius:10px;padding:12px;margin-bottom:10px}
-    .q-ok{border-left-color:#10b981}
-    .q-bad{border-left-color:#ef4444}
-    .q-num{font-size:11px;color:#6b7280;font-weight:700;text-transform:uppercase}
-    .q-text{font-size:14px;font-weight:700;color:#111827;margin-top:4px}
-    .opts{display:grid;gap:6px;margin-top:8px}
-    .opt{padding:6px 10px;border-radius:8px;background:#fff;border:1px solid #e5e7eb;font-size:13px;color:#374151}
-    .opt-correct{background:#dcfce7;border-color:#86efac;color:#166534;font-weight:700}
-    .opt-wrong{background:#fee2e2;border-color:#fecaca;color:#991b1b;font-weight:700}
-    .suffix{font-weight:600;opacity:0.8;margin-left:4px}
-    .tbl{width:100%;border-collapse:collapse;font-size:13px}
-    .tbl th,.tbl td{padding:8px 10px;text-align:left;border-bottom:1px solid #e5e7eb}
-    .tbl th{background:#f9fafb;font-weight:800;color:#374151}
-    .badge{display:inline-block;padding:3px 8px;border-radius:999px;font-size:11px;font-weight:800}
-    .badge-pass{background:#dcfce7;color:#166534}
-    .badge-fail{background:#fee2e2;color:#991b1b}
+    html,body{margin:0;padding:0}
+    body{font-family:"Times New Roman",Georgia,serif;background:#f3f4f6;color:#111827;padding:24px;line-height:1.55}
+    .page{max-width:820px;margin:0 auto;background:#fff;padding:48px 52px;box-shadow:0 4px 12px rgba(15,23,42,0.08)}
+
+    .report-hdr{border-bottom:2px solid #111827;padding-bottom:14px;margin-bottom:24px}
+    .brand-block{display:flex;align-items:center;gap:14px}
+    .brand-mark{width:54px;height:54px;border:2px solid #111827;border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;font-weight:900;font-size:20px;letter-spacing:0.05em}
+    .brand-name{font-size:20px;font-weight:900;letter-spacing:0.01em}
+    .brand-sub{font-size:12px;color:#4b5563;font-style:italic;margin-top:2px}
+    .report-title{font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;margin:18px 0 4px;color:#111827}
+    .report-date{font-size:11px;color:#6b7280;letter-spacing:0.04em;text-transform:uppercase}
+
+    .sec{font-family:Arial,Helvetica,sans-serif;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;color:#111827;border-bottom:1px solid #d1d5db;padding-bottom:6px;margin:24px 0 12px}
+
+    .info{width:100%;border-collapse:collapse;font-size:13.5px;margin-bottom:6px}
+    .info th{text-align:left;padding:6px 12px 6px 0;font-weight:700;color:#374151;width:38%;vertical-align:top;border-bottom:1px solid #f3f4f6}
+    .info td{padding:6px 0;color:#111827;font-weight:600;border-bottom:1px solid #f3f4f6;word-break:break-word}
+    .info tr:last-child th,.info tr:last-child td{border-bottom:none}
+
+    .summary{border:1px solid #111827;padding:14px 18px;margin-bottom:6px}
+    .summary-row{display:flex;justify-content:space-between;gap:24px}
+    .summary-cell{text-align:center;flex:1}
+    .summary-lbl{font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:#4b5563;font-weight:700}
+    .summary-val{font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:900;color:#111827;margin-top:4px}
+    .summary-val.status-pass,.status.status-pass{color:#15803d}
+    .summary-val.status-fail,.status.status-fail{color:#b91c1c}
+    .status{display:inline-block;padding:2px 9px;border:1.5px solid currentColor;font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:900;letter-spacing:0.08em}
+
+    .q{border:1px solid #d1d5db;padding:12px 16px;margin-bottom:10px;page-break-inside:avoid;break-inside:avoid}
+    .q-num{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#6b7280;font-weight:800;letter-spacing:0.06em;text-transform:uppercase}
+    .q-text{font-size:14.5px;font-weight:700;color:#111827;margin:4px 0 8px;line-height:1.45}
+    .qa{width:100%;border-collapse:collapse;font-size:13px}
+    .qa th{width:30%;text-align:left;padding:4px 12px 4px 0;color:#4b5563;font-weight:600;vertical-align:top}
+    .qa td{padding:4px 0;color:#111827;font-weight:600;word-break:break-word}
+    .result-correct{font-family:Arial,Helvetica,sans-serif;color:#15803d;font-weight:900;letter-spacing:0.04em;text-transform:uppercase}
+    .result-wrong{font-family:Arial,Helvetica,sans-serif;color:#b91c1c;font-weight:900;letter-spacing:0.04em;text-transform:uppercase}
+
+    .tbl{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+    .tbl th,.tbl td{padding:6px 8px;text-align:left;border:1px solid #d1d5db}
+    .tbl th{background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#111827;font-weight:800}
+
+    .report-ftr{margin-top:32px;padding-top:12px;border-top:1px solid #d1d5db;display:flex;justify-content:space-between;gap:12px;font-size:11px;color:#6b7280;font-style:italic}
+
+    @page{size:A4;margin:14mm}
     @media print{
       body{background:#fff;padding:0}
-      .page{box-shadow:none;border-radius:0;padding:18px}
+      .page{box-shadow:none;padding:0;max-width:none}
       .no-print{display:none!important}
+      .q{page-break-inside:avoid;break-inside:avoid}
+      .tbl tr{page-break-inside:avoid;break-inside:avoid}
     }
   `;
 }

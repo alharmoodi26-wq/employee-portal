@@ -60,15 +60,21 @@ export async function POST(req: NextRequest) {
       typeof assessment.maxAttempts === "number" ? assessment.maxAttempts : 2;
 
     const nameNormalized = normalizeName(participantName);
-    const aggregate = await db
+    const baseQuery = db
       .collection("assessmentSubmissions")
       .where("assessmentId", "==", assessmentId)
       .where("participantNameNormalized", "==", nameNormalized)
-      .where("branch", "==", branch)
-      .count()
-      .get();
+      .where("branch", "==", branch);
 
-    const used = aggregate.data().count;
+    // total − soft-deleted: a deleted attempt frees up a slot.
+    // We subtract instead of filtering with `deleted == false` because legacy
+    // submissions don't have the `deleted` field at all.
+    const [totalAgg, deletedAgg] = await Promise.all([
+      baseQuery.count().get(),
+      baseQuery.where("deleted", "==", true).count().get(),
+    ]);
+
+    const used = Math.max(0, totalAgg.data().count - deletedAgg.data().count);
     const remaining = Math.max(0, maxAttempts - used);
 
     return NextResponse.json({

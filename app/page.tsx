@@ -1158,6 +1158,18 @@ export default function HomePage() {
               typeof data.percentage === "number" ? data.percentage : 0,
             status,
             submittedAt: submittedAtIso,
+            deleted: data.deleted === true,
+            deletedAt:
+              typeof data.deletedAt === "object" &&
+              data.deletedAt &&
+              "toDate" in data.deletedAt
+                ? (data.deletedAt as { toDate: () => Date }).toDate().toISOString()
+                : typeof data.deletedAt === "string"
+                ? data.deletedAt
+                : undefined,
+            deletedBy: typeof data.deletedBy === "string" ? data.deletedBy : undefined,
+            deletedByName:
+              typeof data.deletedByName === "string" ? data.deletedByName : undefined,
           };
         });
         setAssessmentSubmissions(items);
@@ -2099,6 +2111,16 @@ export default function HomePage() {
     });
   };
 
+  const softDeleteAssessmentSubmission = async (submissionId: string): Promise<void> => {
+    if (!currentUser) throw new Error("Not signed in.");
+    await updateDoc(doc(db, "assessmentSubmissions", submissionId), {
+      deleted: true,
+      deletedAt: serverTimestamp(),
+      deletedBy: currentUser.uid,
+      deletedByName: currentUser.name,
+    });
+  };
+
   if (!splashDone) {
     return (
       <div style={{
@@ -2264,6 +2286,7 @@ export default function HomePage() {
           onUpdateAssessment={updateAssessment}
           onDeleteAssessment={deleteAssessment}
           onToggleAssessmentActive={toggleAssessmentActive}
+          onSoftDeleteSubmission={softDeleteAssessmentSubmission}
           showToast={showToast}
         />
       ) : (
