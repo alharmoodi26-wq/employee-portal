@@ -109,6 +109,18 @@ export default function AdminAssessments({
     () => rawSubmissions.filter((s) => s.deleted !== true),
     [rawSubmissions]
   );
+
+  // Submissions whose parent assessment was deleted become orphans — they
+  // stay in Firestore for the audit trail but should not inflate the
+  // dashboard stats. `liveSubmissions` excludes them.
+  const assessmentIdSet = useMemo(
+    () => new Set(assessments.map((a) => a.id)),
+    [assessments]
+  );
+  const liveSubmissions = useMemo(
+    () => submissions.filter((s) => assessmentIdSet.has(s.assessmentId)),
+    [submissions, assessmentIdSet]
+  );
   const theme = getThemePalette();
   const isDark = getThemeMode() === "dark";
 
@@ -361,8 +373,8 @@ export default function AdminAssessments({
   // Stats
   const totalAssessments = assessments.length;
   const totalActive = assessments.filter((a) => a.isActive).length;
-  const totalSubmissions = submissions.length;
-  const totalPasses = submissions.filter((s) => s.status === "Pass").length;
+  const totalSubmissions = liveSubmissions.length;
+  const totalPasses = liveSubmissions.filter((s) => s.status === "Pass").length;
 
   if (view.type === "submission") {
     const sub = submissions.find((s) => s.id === view.submissionId);
