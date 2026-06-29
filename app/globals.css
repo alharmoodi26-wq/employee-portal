@@ -55,6 +55,12 @@ html {
 .report-observation-row { grid-template-columns: 180px 1fr; }
 .report-info-grid       { grid-template-columns: repeat(3, 1fr); }
 
+/* ─── Full assessments report ───────────────────────── */
+.full-report-stats          { grid-template-columns: repeat(5, 1fr); }
+.assessment-section-stats   { grid-template-columns: repeat(6, 1fr); }
+.participants-table-desktop { display: block; }
+.participants-cards-mobile  { display: none !important; }
+
 /* ─── Employee profile ───────────────────────────────── */
 .emp-info-grid  { grid-template-columns: repeat(2, 1fr); }
 .emp-stat-tiles { grid-template-columns: repeat(4, 1fr); }
@@ -128,6 +134,20 @@ html {
   .reports-filter-grid    { grid-template-columns: 1fr !important; }
   .report-observation-row { grid-template-columns: 1fr !important; }
   .report-info-grid       { grid-template-columns: 1fr 1fr !important; }
+
+  /* Full Assessments Report — table → cards swap on mobile */
+  .full-report-stats          { grid-template-columns: repeat(2, 1fr) !important; }
+  .assessment-section-stats   { grid-template-columns: repeat(2, 1fr) !important; }
+  .full-report-title          { font-size: 20px !important; }
+  .full-report-header         { flex-direction: column !important; align-items: stretch !important; }
+  .full-report-actions        { width: 100% !important; }
+  .full-report-actions button { flex: 1 1 0; min-width: 0; }
+  .participants-table-desktop { display: none !important; }
+  .participants-cards-mobile  { display: grid !important; }
+
+  /* Assessments toolbar — full-width buttons on mobile */
+  .assessments-toolbar-actions        { width: 100%; }
+  .assessments-toolbar-actions button { flex: 1 1 calc(50% - 4px); min-width: 0; }
   .emp-info-grid          { grid-template-columns: 1fr !important; }
   .emp-stat-tiles         { grid-template-columns: repeat(2, 1fr) !important; }
   .emp-profile-actions    { width: 100% !important; flex-wrap: wrap !important; }

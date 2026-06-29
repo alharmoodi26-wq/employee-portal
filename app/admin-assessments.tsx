@@ -23,6 +23,7 @@ import {
   StatBox,
   ToastType,
 } from "./portal-utils";
+import AdminAssessmentsReport from "./admin-assessments-report";
 
 export type AssessmentDraftQuestion = {
   id: string;
@@ -127,7 +128,8 @@ export default function AdminAssessments({
   type View =
     | { type: "list" }
     | { type: "results"; assessmentId: string }
-    | { type: "submission"; submissionId: string };
+    | { type: "submission"; submissionId: string }
+    | { type: "fullReport" };
 
   const [view, setView] = useState<View>({ type: "list" });
   const [editorOpen, setEditorOpen] = useState(false);
@@ -419,6 +421,17 @@ export default function AdminAssessments({
     );
   }
 
+  if (view.type === "fullReport") {
+    return (
+      <AdminAssessmentsReport
+        assessments={assessments}
+        submissions={liveSubmissions}
+        loading={loadingAssessments || loadingSubmissions}
+        onClose={() => setView({ type: "list" })}
+      />
+    );
+  }
+
   return (
     <div style={{ display: "grid", gap: 18 }}>
       {/* Top stats */}
@@ -451,7 +464,24 @@ export default function AdminAssessments({
             onChange={(e) => setSearch(e.target.value)}
             style={{ ...inputStyle(), maxWidth: 340 }}
           />
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div
+            style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
+            className="assessments-toolbar-actions"
+          >
+            <button
+              style={{
+                ...buttonStyle(false),
+                background:
+                  "linear-gradient(135deg, rgba(99,102,241,0.10) 0%, rgba(79,70,229,0.06) 100%)",
+                borderColor: isDark ? "rgba(99,102,241,0.4)" : "#c7d2fe",
+                color: "#6366f1",
+                fontWeight: 800,
+              }}
+              onClick={() => setView({ type: "fullReport" })}
+              title="View consolidated report across all assessments"
+            >
+              📊 Full Report
+            </button>
             <button style={buttonStyle(false)} onClick={handleOpenGenerate}>
               🪄 Generate from File
             </button>
