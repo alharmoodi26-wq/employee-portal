@@ -13,7 +13,9 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
+  setDoc,
   updateDoc,
   deleteDoc,
   where,
@@ -23,11 +25,12 @@ import {
   signInWithEmailAndPassword,
   signOut,
 } from "firebase/auth";
-import { getDownloadURL, ref } from "firebase/storage";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 
 import EmployeeDashboard from "./employee-dashboard";
 import AdminDashboard from "./admin-dashboard";
 import { AssessmentDraft } from "./admin-assessments";
+import { ReportDraft } from "./admin-reports";
 import {
   Assessment,
   AssessmentBranch,
@@ -40,6 +43,10 @@ import {
   Employee,
   getCurrentIsoString,
   getTodayDateString,
+  Report,
+  ReportObservation,
+  ReportPriority,
+  ReportStatus,
   setThemeMode,
   ThemeMode,
   Toast,
@@ -504,6 +511,8 @@ export default function HomePage() {
   const [assessmentSubmissions, setAssessmentSubmissions] = useState<AssessmentSubmission[]>([]);
   const [loadingAssessments, setLoadingAssessments] = useState(true);
   const [loadingAssessmentSubmissions, setLoadingAssessmentSubmissions] = useState(true);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [loadingReports, setLoadingReports] = useState(true);
   const [currentUser, setCurrentUser] = useState<Employee | null>(null);
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -1178,6 +1187,108 @@ export default function HomePage() {
       (error) => {
         console.error("Error loading assessment submissions:", error);
         setLoadingAssessmentSubmissions(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || currentUser.role !== "admin") {
+      setReports([]);
+      setLoadingReports(false);
+      return;
+    }
+
+    setLoadingReports(true);
+
+    const toIso = (val: unknown): string => {
+      if (val && typeof val === "object" && "toDate" in val) {
+        return (val as { toDate: () => Date }).toDate().toISOString();
+      }
+      return typeof val === "string" ? val : "";
+    };
+
+    const validPriority = (v: unknown): ReportPriority => {
+      if (v === "Low" || v === "Medium" || v === "High" || v === "Critical") return v;
+      return "Medium";
+    };
+    const validStatus = (v: unknown): ReportStatus => {
+      if (
+        v === "Draft" ||
+        v === "Submitted" ||
+        v === "Under Review" ||
+        v === "Approved" ||
+        v === "Action Required" ||
+        v === "Closed"
+      )
+        return v;
+      return "Draft";
+    };
+
+    const unsubscribe = onSnapshot(
+      query(collection(db, "reports"), orderBy("createdAt", "desc")),
+      (snapshot) => {
+        const items: Report[] = snapshot.docs.map((document) => {
+          const data = document.data();
+          const rawObservations = Array.isArray(data.observations)
+            ? data.observations
+            : [];
+          const observations: ReportObservation[] = rawObservations.map(
+            (raw: unknown) => {
+              const o = (raw ?? {}) as Record<string, unknown>;
+              return {
+                id: typeof o.id === "string" ? o.id : `obs-${Math.random()}`,
+                imageUrl:
+                  typeof o.imageUrl === "string" ? o.imageUrl : undefined,
+                imagePath:
+                  typeof o.imagePath === "string" ? o.imagePath : undefined,
+                description:
+                  typeof o.description === "string" ? o.description : "",
+                recommendation:
+                  typeof o.recommendation === "string" ? o.recommendation : "",
+                priority: validPriority(o.priority),
+              };
+            }
+          );
+
+          return {
+            id: document.id,
+            reportNumber:
+              typeof data.reportNumber === "string" ? data.reportNumber : "",
+            title: typeof data.title === "string" ? data.title : "",
+            branchName:
+              typeof data.branchName === "string" ? data.branchName : "",
+            visitDate:
+              typeof data.visitDate === "string" ? data.visitDate : "",
+            preparedBy:
+              typeof data.preparedBy === "string" ? data.preparedBy : "",
+            status: validStatus(data.status),
+            priority: validPriority(data.priority),
+            observations,
+            createdAt: toIso(data.createdAt),
+            updatedAt: toIso(data.updatedAt),
+            createdByUid:
+              typeof data.createdByUid === "string" ? data.createdByUid : "",
+            createdByName:
+              typeof data.createdByName === "string" ? data.createdByName : "",
+            deleted: data.deleted === true,
+            deletedAt:
+              data.deletedAt ? toIso(data.deletedAt) || undefined : undefined,
+            deletedBy:
+              typeof data.deletedBy === "string" ? data.deletedBy : undefined,
+            deletedByName:
+              typeof data.deletedByName === "string"
+                ? data.deletedByName
+                : undefined,
+          };
+        });
+        setReports(items);
+        setLoadingReports(false);
+      },
+      (error) => {
+        console.error("Error loading reports:", error);
+        setLoadingReports(false);
       }
     );
 
@@ -2121,6 +2232,154 @@ export default function HomePage() {
     });
   };
 
+  // ── Reports CRUD ────────────────────────────────────────────────────
+  const uploadReportImage = async (
+    reportId: string,
+    file: File
+  ): Promise<{ url: string; path: string }> => {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const path = `report-images/${reportId}/${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}-${safeName}`;
+    const fileRef = ref(storage, path);
+    await uploadBytes(fileRef, file);
+    const url = await getDownloadURL(fileRef);
+    return { url, path };
+  };
+
+  const generateReportNumber = async (): Promise<string> => {
+    return await runTransaction(db, async (tx) => {
+      const counterRef = doc(db, "counters", "reportSequence");
+      const counterSnap = await tx.get(counterRef);
+      const year = new Date().getFullYear();
+      let lastNumber = 0;
+      if (counterSnap.exists()) {
+        const data = counterSnap.data();
+        if (data.year === year && typeof data.lastNumber === "number") {
+          lastNumber = data.lastNumber;
+        }
+      }
+      const nextNumber = lastNumber + 1;
+      tx.set(counterRef, {
+        year,
+        lastNumber: nextNumber,
+        updatedAt: serverTimestamp(),
+      });
+      return `RPT-${year}-${String(nextNumber).padStart(4, "0")}`;
+    });
+  };
+
+  const createReport = async (
+    draft: ReportDraft
+  ): Promise<{ id: string; reportNumber: string }> => {
+    if (!currentUser) throw new Error("Not signed in.");
+
+    const newDocRef = doc(collection(db, "reports"));
+    const reportNumber = await generateReportNumber();
+
+    const observations: ReportObservation[] = [];
+    for (const o of draft.observations) {
+      let imageUrl: string | undefined;
+      let imagePath: string | undefined;
+      if (o.newImageFile) {
+        const result = await uploadReportImage(newDocRef.id, o.newImageFile);
+        imageUrl = result.url;
+        imagePath = result.path;
+      }
+      const obs: ReportObservation = {
+        id: o.id,
+        description: o.description.trim(),
+        recommendation: o.recommendation.trim(),
+        priority: o.priority,
+      };
+      if (imageUrl) obs.imageUrl = imageUrl;
+      if (imagePath) obs.imagePath = imagePath;
+      observations.push(obs);
+    }
+
+    await setDoc(newDocRef, {
+      reportNumber,
+      title: draft.title.trim(),
+      branchName: draft.branchName.trim(),
+      visitDate: draft.visitDate,
+      preparedBy: draft.preparedBy.trim(),
+      status: draft.status,
+      priority: draft.priority,
+      observations,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      createdByUid: currentUser.uid,
+      createdByName: currentUser.name,
+      deleted: false,
+    });
+
+    return { id: newDocRef.id, reportNumber };
+  };
+
+  const updateReport = async (
+    id: string,
+    draft: ReportDraft
+  ): Promise<void> => {
+    if (!currentUser) throw new Error("Not signed in.");
+
+    const observations: ReportObservation[] = [];
+    for (const o of draft.observations) {
+      let imageUrl: string | undefined;
+      let imagePath: string | undefined;
+      if (o.newImageFile) {
+        const result = await uploadReportImage(id, o.newImageFile);
+        imageUrl = result.url;
+        imagePath = result.path;
+      } else if (!o.removeImage && o.existingImageUrl) {
+        imageUrl = o.existingImageUrl;
+        imagePath = o.existingImagePath;
+      }
+      const obs: ReportObservation = {
+        id: o.id,
+        description: o.description.trim(),
+        recommendation: o.recommendation.trim(),
+        priority: o.priority,
+      };
+      if (imageUrl) obs.imageUrl = imageUrl;
+      if (imagePath) obs.imagePath = imagePath;
+      observations.push(obs);
+    }
+
+    await updateDoc(doc(db, "reports", id), {
+      title: draft.title.trim(),
+      branchName: draft.branchName.trim(),
+      visitDate: draft.visitDate,
+      preparedBy: draft.preparedBy.trim(),
+      status: draft.status,
+      priority: draft.priority,
+      observations,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const softDeleteReport = (id: string, title: string) => {
+    if (!currentUser) return;
+    setConfirmState({
+      open: true,
+      title: "Delete report",
+      message: `Delete "${title}"? It will be soft-deleted and removed from the list. Firestore data is retained for the audit trail.`,
+      onConfirm: async () => {
+        try {
+          await updateDoc(doc(db, "reports", id), {
+            deleted: true,
+            deletedAt: serverTimestamp(),
+            deletedBy: currentUser.uid,
+            deletedByName: currentUser.name,
+          });
+          showToast("success", "Report deleted.");
+        } catch (error) {
+          console.error(error);
+          showToast("error", "Could not delete the report.");
+        }
+      },
+    });
+  };
+
   if (!splashDone) {
     return (
       <div style={{
@@ -2287,6 +2546,11 @@ export default function HomePage() {
           onDeleteAssessment={deleteAssessment}
           onToggleAssessmentActive={toggleAssessmentActive}
           onSoftDeleteSubmission={softDeleteAssessmentSubmission}
+          reports={reports}
+          loadingReports={loadingReports}
+          onCreateReport={createReport}
+          onUpdateReport={updateReport}
+          onSoftDeleteReport={softDeleteReport}
           showToast={showToast}
         />
       ) : (

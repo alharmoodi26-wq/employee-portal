@@ -23,6 +23,7 @@ import {
   inputStyle,
   navBadgeStyle,
   navItemStyle,
+  Report,
   ReportDateRange,
   SectionTitle,
   sidebarContentStyle,
@@ -44,8 +45,9 @@ import {
   safeUrl,
 } from "./portal-utils";
 import AdminAssessments, { AssessmentDraft } from "./admin-assessments";
+import AdminReports, { ReportDraft } from "./admin-reports";
 
-type DashboardTab = "dashboard" | "review" | "employees" | "hr" | "invoices" | "assessments";
+type DashboardTab = "dashboard" | "review" | "employees" | "hr" | "invoices" | "assessments" | "reports";
 type HRSubTab = "attendance" | "ohc" | "birthdays";
 type ReviewFilter = "pending" | "active" | "approved";
 
@@ -208,6 +210,14 @@ type AdminDashboardProps = {
   onDeleteAssessment?: (id: string, title: string) => void;
   onToggleAssessmentActive?: (id: string, nextActive: boolean) => Promise<void>;
   onSoftDeleteSubmission?: (submissionId: string) => Promise<void>;
+  // Reports
+  reports?: Report[];
+  loadingReports?: boolean;
+  onCreateReport?: (
+    draft: ReportDraft
+  ) => Promise<{ id: string; reportNumber: string }>;
+  onUpdateReport?: (id: string, draft: ReportDraft) => Promise<void>;
+  onSoftDeleteReport?: (id: string, title: string) => void;
   showToast: (type: ToastType, message: string) => void;
 };
 
@@ -855,6 +865,11 @@ export default function AdminDashboard({
   onDeleteAssessment,
   onToggleAssessmentActive,
   onSoftDeleteSubmission,
+  reports = [],
+  loadingReports = false,
+  onCreateReport,
+  onUpdateReport,
+  onSoftDeleteReport,
   showToast,
 }: AdminDashboardProps) {
   const theme = getThemePalette();
@@ -1912,6 +1927,7 @@ export default function AdminDashboard({
     hr: "HR",
     invoices: "Invoices",
     assessments: "Assessments",
+    reports: "Reports",
   };
 
   return (
@@ -2222,6 +2238,7 @@ export default function AdminDashboard({
               { id: "hr",          icon: "🏢", label: "HR",          badge: pendingAttendanceCount },
               { id: "invoices",    icon: "💰", label: "Invoices",    badge: invoiceReviewItems.length },
               { id: "assessments", icon: "📝", label: "Assessments", badge: 0 },
+              { id: "reports",     icon: "📑", label: "Reports",     badge: 0 },
             ] as { id: DashboardTab; icon: string; label: string; badge: number }[]
           ).map(({ id, icon, label, badge }) => (
             <button
@@ -4074,6 +4091,34 @@ export default function AdminDashboard({
           />
         )}
 
+        {activeTab === "reports" && (
+          <AdminReports
+            reports={reports}
+            loading={loadingReports}
+            currentUserName={currentUser.name}
+            onCreateReport={async (draft) => {
+              if (!onCreateReport) {
+                throw new Error("Report creation is not wired up.");
+              }
+              return onCreateReport(draft);
+            }}
+            onUpdateReport={async (id, draft) => {
+              if (!onUpdateReport) {
+                throw new Error("Report update is not wired up.");
+              }
+              return onUpdateReport(id, draft);
+            }}
+            onSoftDeleteReport={(id, title) => {
+              if (!onSoftDeleteReport) {
+                showToast("error", "Report deletion is not wired up.");
+                return;
+              }
+              onSoftDeleteReport(id, title);
+            }}
+            showToast={showToast}
+          />
+        )}
+
         {invoiceFormOpen && (
           <div style={{
             position: "fixed", inset: 0,
@@ -4555,7 +4600,8 @@ export default function AdminDashboard({
           { id: "employees",   label: "Employees",   icon: "👥" },
           { id: "hr",          label: "HR",          icon: "⚕️" },
           { id: "invoices",    label: "Invoices",    icon: "💰" },
-          { id: "assessments", label: "Assessments", icon: "📝" },
+          { id: "assessments", label: "Quizzes",     icon: "📝" },
+          { id: "reports",     label: "Reports",     icon: "📑" },
         ]}
       />
     </div>

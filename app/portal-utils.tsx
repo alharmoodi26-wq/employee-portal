@@ -168,6 +168,69 @@ export type AssessmentSubmission = {
   deletedByName?: string;
 };
 
+// ── Reports (Field Visit Reports) ──────────────────────────────────────
+export type ReportStatus =
+  | "Draft"
+  | "Submitted"
+  | "Under Review"
+  | "Approved"
+  | "Action Required"
+  | "Closed";
+
+export type ReportPriority = "Low" | "Medium" | "High" | "Critical";
+
+export type ReportBranch = "PS Muraqqabat" | "PS Karama";
+
+export type ReportObservation = {
+  id: string;
+  imageUrl?: string;
+  imagePath?: string;
+  description: string;
+  recommendation: string;
+  priority: ReportPriority;
+};
+
+export type Report = {
+  id: string;
+  reportNumber: string;
+  title: string;
+  branchName: ReportBranch | string;
+  visitDate: string;
+  preparedBy: string;
+  status: ReportStatus;
+  priority: ReportPriority;
+  observations: ReportObservation[];
+  createdAt: string;
+  updatedAt: string;
+  createdByUid: string;
+  createdByName: string;
+  deleted?: boolean;
+  deletedAt?: string;
+  deletedBy?: string;
+  deletedByName?: string;
+};
+
+export const REPORT_STATUSES: ReportStatus[] = [
+  "Draft",
+  "Submitted",
+  "Under Review",
+  "Approved",
+  "Action Required",
+  "Closed",
+];
+
+export const REPORT_PRIORITIES: ReportPriority[] = [
+  "Low",
+  "Medium",
+  "High",
+  "Critical",
+];
+
+export const REPORT_BRANCHES: ReportBranch[] = [
+  "PS Muraqqabat",
+  "PS Karama",
+];
+
 export const COMPANY_NAME = "Emirates International Holdings Group";
 export const SYSTEM_NAME = "Employee Work Management Portal";
 

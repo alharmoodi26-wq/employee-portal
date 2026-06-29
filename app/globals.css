@@ -50,6 +50,11 @@ html {
 .review-filter-tiles { grid-template-columns: repeat(3, 1fr); }
 .review-search-grid  { grid-template-columns: 2fr 1fr; }
 
+/* ─── Reports page ──────────────────────────────────── */
+.reports-filter-grid    { grid-template-columns: 2fr 1fr 1fr 1fr 1fr; }
+.report-observation-row { grid-template-columns: 180px 1fr; }
+.report-info-grid       { grid-template-columns: repeat(3, 1fr); }
+
 /* ─── Employee profile ───────────────────────────────── */
 .emp-info-grid  { grid-template-columns: repeat(2, 1fr); }
 .emp-stat-tiles { grid-template-columns: repeat(4, 1fr); }
@@ -120,6 +125,9 @@ html {
   .task-work-scroll       { max-height: none !important; overflow-y: visible !important; }
   .review-filter-tiles    { grid-template-columns: 1fr !important; }
   .review-search-grid     { grid-template-columns: 1fr !important; }
+  .reports-filter-grid    { grid-template-columns: 1fr !important; }
+  .report-observation-row { grid-template-columns: 1fr !important; }
+  .report-info-grid       { grid-template-columns: 1fr 1fr !important; }
   .emp-info-grid          { grid-template-columns: 1fr !important; }
   .emp-stat-tiles         { grid-template-columns: repeat(2, 1fr) !important; }
   .emp-profile-actions    { width: 100% !important; flex-wrap: wrap !important; }
