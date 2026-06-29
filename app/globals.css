@@ -58,6 +58,8 @@ html {
 /* ─── Full assessments report ───────────────────────── */
 .full-report-stats          { grid-template-columns: repeat(5, 1fr); }
 .assessment-section-stats   { grid-template-columns: repeat(6, 1fr); }
+.dashboard-grid             { grid-template-columns: repeat(7, 1fr); }
+.exec-summary-grid          { grid-template-columns: repeat(2, 1fr); }
 .participants-table-desktop { display: block; }
 .participants-cards-mobile  { display: none !important; }
 
@@ -138,10 +140,15 @@ html {
   /* Full Assessments Report — table → cards swap on mobile */
   .full-report-stats          { grid-template-columns: repeat(2, 1fr) !important; }
   .assessment-section-stats   { grid-template-columns: repeat(2, 1fr) !important; }
+  .dashboard-grid             { grid-template-columns: repeat(2, 1fr) !important; }
+  .exec-summary-grid          { grid-template-columns: 1fr !important; }
   .full-report-title          { font-size: 20px !important; }
   .full-report-header         { flex-direction: column !important; align-items: stretch !important; }
   .full-report-actions        { width: 100% !important; }
   .full-report-actions button { flex: 1 1 0; min-width: 0; }
+  .cover-card                 { padding: 34px 22px !important; }
+  .cover-brand-1              { font-size: 17px !important; letter-spacing: 0.04em !important; }
+  .cover-doc-title            { font-size: 14px !important; padding: 8px 12px !important; letter-spacing: 0.14em !important; }
   .participants-table-desktop { display: none !important; }
   .participants-cards-mobile  { display: grid !important; }
 
