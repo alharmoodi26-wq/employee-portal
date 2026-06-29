@@ -518,8 +518,9 @@ export default function AdminAssessments({
                   ? 0
                   : Math.round(subs.reduce((sum, s) => sum + s.percentage, 0) / subs.length);
               return (
-                <div key={a.id} style={softCardStyle()}>
+                <div key={a.id} style={softCardStyle()} className="assessment-list-card">
                   <div
+                    className="assessment-card-row"
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
@@ -568,7 +569,10 @@ export default function AdminAssessments({
                       </div>
                     </div>
 
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+                    <div
+                      className="assessment-card-actions"
+                      style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}
+                    >
                       <button
                         style={smallButtonStyle()}
                         onClick={() => setView({ type: "results", assessmentId: a.id })}
@@ -607,6 +611,7 @@ export default function AdminAssessments({
 
                   {/* Link box */}
                   <div
+                    className="assessment-card-linkbox"
                     style={{
                       marginTop: 14,
                       background: theme.fileCardBg,

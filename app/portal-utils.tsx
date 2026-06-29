@@ -115,7 +115,7 @@ export type EmployeeReportData = {
   summary: string;
 };
 
-// ── Assessments (Quizzes) ──────────────────────────────────────────────
+// ── Assessments ────────────────────────────────────────────────────────
 export type AssessmentQuestion = {
   id: string;
   text: string;
@@ -483,17 +483,111 @@ export function MobileBottomNav({
   onTabChange: (id: string) => void;
 }) {
   const theme = getThemePalette();
-  return (
-    <nav
-      className="portal-bottom-nav"
-      style={{ background: theme.cardBackground, borderTop: `1px solid ${theme.cardBorder}` }}
+  const [sheetOpen, setSheetOpen] = useState(false);
+
+  // Up to 5 tabs fit comfortably on a phone. Beyond that, surface the first
+  // 4 in the bar and tuck the rest into a "More" bottom sheet.
+  const MAX_PRIMARY = 4;
+  const primary = tabs.length <= 5 ? tabs : tabs.slice(0, MAX_PRIMARY);
+  const secondary = tabs.length <= 5 ? [] : tabs.slice(MAX_PRIMARY);
+
+  const moreBadgeTotal = secondary.reduce(
+    (n, t) => n + (t.badge || 0),
+    0
+  );
+  const moreActive = secondary.some((t) => t.id === activeTab);
+
+  const renderTab = (
+    tab: { id: string; label: string; icon: string; badge?: number },
+    active: boolean,
+    onClick: () => void,
+    options?: { compactLabel?: boolean }
+  ) => (
+    <button
+      key={tab.id}
+      onClick={onClick}
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 2,
+        background: "none",
+        border: "none",
+        cursor: "pointer",
+        padding: "6px 2px",
+        position: "relative",
+        minWidth: 0,
+      }}
     >
-      {tabs.map((tab) => {
-        const active = tab.id === activeTab;
-        return (
+      {active && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: 28,
+            height: 3,
+            borderRadius: "0 0 4px 4px",
+            background: "#6366f1",
+          }}
+        />
+      )}
+      <div style={{ position: "relative", display: "inline-flex" }}>
+        <span style={{ fontSize: 20 }}>{tab.icon}</span>
+        {tab.badge ? (
+          <span
+            style={{
+              position: "absolute",
+              top: -4,
+              right: -6,
+              background: "#ef4444",
+              color: "#fff",
+              borderRadius: 999,
+              fontSize: 9,
+              fontWeight: 900,
+              padding: "1px 4px",
+              minWidth: 14,
+              textAlign: "center",
+            }}
+          >
+            {tab.badge > 99 ? "99+" : tab.badge}
+          </span>
+        ) : null}
+      </div>
+      <span
+        style={{
+          fontSize: options?.compactLabel ? 9 : 10,
+          fontWeight: active ? 800 : 600,
+          color: active ? "#6366f1" : theme.subtleText,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          maxWidth: "100%",
+        }}
+      >
+        {tab.label}
+      </span>
+    </button>
+  );
+
+  return (
+    <>
+      <nav
+        className="portal-bottom-nav"
+        style={{
+          background: theme.cardBackground,
+          borderTop: `1px solid ${theme.cardBorder}`,
+        }}
+      >
+        {primary.map((tab) =>
+          renderTab(tab, tab.id === activeTab, () => onTabChange(tab.id))
+        )}
+        {secondary.length > 0 && (
           <button
-            key={tab.id}
-            onClick={() => onTabChange(tab.id)}
+            onClick={() => setSheetOpen(true)}
             style={{
               flex: 1,
               display: "flex",
@@ -506,26 +600,208 @@ export function MobileBottomNav({
               cursor: "pointer",
               padding: "6px 2px",
               position: "relative",
+              minWidth: 0,
             }}
           >
-            {active && (
-              <div style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", width: 28, height: 3, borderRadius: "0 0 4px 4px", background: "#6366f1" }} />
+            {moreActive && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  width: 28,
+                  height: 3,
+                  borderRadius: "0 0 4px 4px",
+                  background: "#6366f1",
+                }}
+              />
             )}
             <div style={{ position: "relative", display: "inline-flex" }}>
-              <span style={{ fontSize: 20 }}>{tab.icon}</span>
-              {tab.badge ? (
-                <span style={{ position: "absolute", top: -4, right: -6, background: "#ef4444", color: "#fff", borderRadius: 999, fontSize: 9, fontWeight: 900, padding: "1px 4px", minWidth: 14, textAlign: "center" }}>
-                  {tab.badge > 99 ? "99+" : tab.badge}
+              <span style={{ fontSize: 20 }}>⋯</span>
+              {moreBadgeTotal > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: -4,
+                    right: -6,
+                    background: "#ef4444",
+                    color: "#fff",
+                    borderRadius: 999,
+                    fontSize: 9,
+                    fontWeight: 900,
+                    padding: "1px 4px",
+                    minWidth: 14,
+                    textAlign: "center",
+                  }}
+                >
+                  {moreBadgeTotal > 99 ? "99+" : moreBadgeTotal}
                 </span>
-              ) : null}
+              )}
             </div>
-            <span style={{ fontSize: 10, fontWeight: active ? 800 : 600, color: active ? "#6366f1" : theme.subtleText }}>
-              {tab.label}
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: moreActive ? 800 : 600,
+                color: moreActive ? "#6366f1" : theme.subtleText,
+              }}
+            >
+              More
             </span>
           </button>
-        );
-      })}
-    </nav>
+        )}
+      </nav>
+
+      {sheetOpen && (
+        <>
+          {/* Backdrop */}
+          <div
+            onClick={() => setSheetOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15,23,42,0.45)",
+              zIndex: 240,
+              animation: "fadeInTab 0.18s ease",
+            }}
+          />
+          {/* Sheet */}
+          <div
+            className="portal-mobile-sheet"
+            role="dialog"
+            aria-label="More navigation"
+            style={{
+              position: "fixed",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 241,
+              background: theme.cardBackground,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              padding: "10px 16px calc(28px + env(safe-area-inset-bottom)) 16px",
+              boxShadow: "0 -16px 40px rgba(15,23,42,0.18)",
+              animation: "slideInNotif 0.22s ease",
+            }}
+          >
+            <div
+              style={{
+                width: 38,
+                height: 4,
+                background: theme.cardBorder,
+                borderRadius: 999,
+                margin: "0 auto 14px auto",
+              }}
+            />
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 14,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 900,
+                  color: theme.title,
+                  letterSpacing: "-0.01em",
+                }}
+              >
+                More
+              </div>
+              <button
+                onClick={() => setSheetOpen(false)}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: theme.subtleText,
+                  fontSize: 18,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  padding: 4,
+                  lineHeight: 1,
+                }}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: 10,
+              }}
+            >
+              {secondary.map((tab) => {
+                const active = tab.id === activeTab;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      onTabChange(tab.id);
+                      setSheetOpen(false);
+                    }}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 6,
+                      padding: "16px 8px",
+                      border: `1px solid ${
+                        active ? "#6366f1" : theme.cardBorder
+                      }`,
+                      borderRadius: 14,
+                      background: active
+                        ? "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)"
+                        : theme.softCardBackground,
+                      color: active ? "#fff" : theme.title,
+                      cursor: "pointer",
+                      position: "relative",
+                      transition: "all 0.18s ease",
+                    }}
+                  >
+                    <span style={{ fontSize: 24, lineHeight: 1 }}>
+                      {tab.icon}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                      }}
+                    >
+                      {tab.label}
+                    </span>
+                    {tab.badge ? (
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: 8,
+                          right: 8,
+                          background: active ? "#fff" : "#ef4444",
+                          color: active ? "#4338ca" : "#fff",
+                          borderRadius: 999,
+                          fontSize: 10,
+                          fontWeight: 900,
+                          padding: "1px 6px",
+                          minWidth: 18,
+                          textAlign: "center",
+                        }}
+                      >
+                        {tab.badge > 99 ? "99+" : tab.badge}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </>
   );
 }
 

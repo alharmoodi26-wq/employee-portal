@@ -4595,13 +4595,15 @@ export default function AdminDashboard({
         activeTab={activeTab}
         onTabChange={(id) => setActiveTab(id as DashboardTab)}
         tabs={[
+          // Primary row — most-used (always visible in bar)
           { id: "dashboard",   label: "Home",        icon: "📊" },
           { id: "review",      label: "Review",      icon: "🔍", badge: pendingCount },
-          { id: "employees",   label: "Employees",   icon: "👥" },
-          { id: "hr",          label: "HR",          icon: "⚕️" },
-          { id: "invoices",    label: "Invoices",    icon: "💰" },
-          { id: "assessments", label: "Quizzes",     icon: "📝" },
+          { id: "assessments", label: "Assessments", icon: "📝" },
           { id: "reports",     label: "Reports",     icon: "📑" },
+          // Secondary — surfaced via "More" sheet
+          { id: "employees",   label: "Employees",   icon: "👥" },
+          { id: "hr",          label: "HR",          icon: "⚕️",  badge: pendingAttendanceCount },
+          { id: "invoices",    label: "Invoices",    icon: "💰", badge: invoiceReviewItems.length },
         ]}
       />
     </div>

@@ -63,6 +63,9 @@ html {
 .participants-table-desktop { display: block; }
 .participants-cards-mobile  { display: none !important; }
 
+/* ─── Assessment list card (desktop default) ────────── */
+.assessment-card-actions button { white-space: nowrap; }
+
 /* ─── Employee profile ───────────────────────────────── */
 .emp-info-grid  { grid-template-columns: repeat(2, 1fr); }
 .emp-stat-tiles { grid-template-columns: repeat(4, 1fr); }
@@ -155,6 +158,53 @@ html {
   /* Assessments toolbar — full-width buttons on mobile */
   .assessments-toolbar-actions        { width: 100%; }
   .assessments-toolbar-actions button { flex: 1 1 calc(50% - 4px); min-width: 0; }
+
+  /* Assessment list card — stack info above actions on mobile,
+     turn the action buttons into a 2-column grid, and let the
+     code/link box wrap with the copy button on its own row */
+  .assessment-card-row {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+  .assessment-card-actions {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    flex-wrap: nowrap !important;
+    gap: 8px !important;
+  }
+  .assessment-card-actions button {
+    width: 100% !important;
+    justify-content: center !important;
+    text-align: center !important;
+    min-height: 38px;
+  }
+  .assessment-card-linkbox {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .assessment-card-linkbox > div:first-child {
+    width: 100%;
+  }
+  .assessment-card-linkbox button {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  /* Generic: prevent any long word from forcing horizontal scroll */
+  .portal-content { word-wrap: break-word; overflow-wrap: anywhere; }
+
+  /* Ensure all interactive elements have a touch-friendly minimum */
+  button { min-height: 38px; }
+
+  /* Reports list cards: tighten min width so 1 column wraps cleanly */
+  .reports-grid { grid-template-columns: 1fr !important; }
+
+  /* Branch comparison cards stack neatly */
+  .branch-compare-grid { grid-template-columns: 1fr !important; }
+
+  /* Assessment summary cards (full report) */
+  .assessment-summary-grid { grid-template-columns: 1fr !important; }
   .emp-info-grid          { grid-template-columns: 1fr !important; }
   .emp-stat-tiles         { grid-template-columns: repeat(2, 1fr) !important; }
   .emp-profile-actions    { width: 100% !important; flex-wrap: wrap !important; }
