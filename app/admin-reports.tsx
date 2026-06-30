@@ -15,6 +15,7 @@ import {
   EmptyState,
   escHtml,
   formatDateTime,
+  getObservationImages,
   getThemeMode,
   getThemePalette,
   inputStyle,
@@ -27,15 +28,22 @@ import {
 } from "./portal-utils";
 
 // ── Draft types passed back to page.tsx for persistence ────────────────
+// A single image inside an observation draft. Existing (already-stored) images
+// carry their storage `existingPath`; freshly picked images carry the local
+// `file` plus a blob preview `url`.
+export type ReportDraftImage = {
+  id: string;
+  url: string;
+  existingPath?: string;
+  file?: File;
+};
+
 export type ReportObservationDraft = {
   id: string;
   description: string;
   recommendation: string;
   priority: ReportPriority;
-  existingImageUrl?: string;
-  existingImagePath?: string;
-  newImageFile?: File | null;
-  removeImage?: boolean;
+  images: ReportDraftImage[];
 };
 
 export type ReportDraft = {
@@ -179,6 +187,7 @@ function emptyDraft(preparedBy: string): ReportDraft {
         description: "",
         recommendation: "",
         priority: "Medium",
+        images: [],
       },
     ],
   };
@@ -197,15 +206,19 @@ function reportToDraft(r: Report): ReportDraft {
       description: o.description,
       recommendation: o.recommendation,
       priority: o.priority,
-      existingImageUrl: o.imageUrl,
-      existingImagePath: o.imagePath,
+      images: getObservationImages(o).map((im) => ({
+        id: uuid(),
+        url: im.url,
+        existingPath: im.path,
+      })),
     })),
   };
 }
 
 function getCoverImage(r: Report): string | undefined {
   for (const obs of r.observations) {
-    if (obs.imageUrl) return obs.imageUrl;
+    const imgs = getObservationImages(obs);
+    if (imgs[0]?.url) return imgs[0].url;
   }
   return undefined;
 }
@@ -815,25 +828,29 @@ function ReportForm({
   const theme = getThemePalette();
   const [draft, setDraft] = useState<ReportDraft>(initial);
   const [saving, setSaving] = useState(false);
-  const [imagePreviews, setImagePreviews] = useState<Record<string, string>>(
-    () => {
-      const map: Record<string, string> = {};
-      for (const o of initial.observations) {
-        if (o.existingImageUrl) map[o.id] = o.existingImageUrl;
-      }
-      return map;
-    }
-  );
+  // Fullscreen viewer for the images of a single observation while editing.
+  const [lightbox, setLightbox] = useState<{
+    urls: string[];
+    index: number;
+  } | null>(null);
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  // Track blob: preview URLs we created so we can revoke them on unmount.
+  const createdBlobs = useRef<Set<string>>(new Set());
 
-  // Cleanup blob URLs on unmount
+  const revokeBlob = (url: string) => {
+    if (url.startsWith("blob:")) {
+      URL.revokeObjectURL(url);
+      createdBlobs.current.delete(url);
+    }
+  };
+
+  // Cleanup any remaining blob URLs on unmount
   useEffect(() => {
+    const blobs = createdBlobs.current;
     return () => {
-      for (const url of Object.values(imagePreviews)) {
-        if (url.startsWith("blob:")) URL.revokeObjectURL(url);
-      }
+      for (const url of blobs) URL.revokeObjectURL(url);
+      blobs.clear();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const update = <K extends keyof ReportDraft>(
@@ -859,50 +876,60 @@ function ReportForm({
           description: "",
           recommendation: "",
           priority: "Medium",
+          images: [],
         },
       ],
     }));
 
   const removeObservation = (id: string) => {
+    setDraft((d) => {
+      const target = d.observations.find((o) => o.id === id);
+      if (target) {
+        for (const img of target.images) revokeBlob(img.url);
+      }
+      return {
+        ...d,
+        observations: d.observations.filter((o) => o.id !== id),
+      };
+    });
+  };
+
+  // Append one or more newly picked images to an observation.
+  const onAddImages = (obsId: string, files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const accepted: ReportDraftImage[] = [];
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) {
+        showToast("error", `"${file.name}" is not an image — skipped.`);
+        continue;
+      }
+      if (file.size > 8 * 1024 * 1024) {
+        showToast("error", `"${file.name}" is larger than 8 MB — skipped.`);
+        continue;
+      }
+      const url = URL.createObjectURL(file);
+      createdBlobs.current.add(url);
+      accepted.push({ id: uuid(), url, file });
+    }
+    if (accepted.length === 0) return;
     setDraft((d) => ({
       ...d,
-      observations: d.observations.filter((o) => o.id !== id),
+      observations: d.observations.map((o) =>
+        o.id === obsId ? { ...o, images: [...o.images, ...accepted] } : o
+      ),
     }));
-    const url = imagePreviews[id];
-    if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
-    setImagePreviews((p) => {
-      const copy = { ...p };
-      delete copy[id];
-      return copy;
-    });
   };
 
-  const onPickImage = (obsId: string, file: File | null) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      showToast("error", "Please choose an image file.");
-      return;
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      showToast("error", "Image too large (max 8 MB).");
-      return;
-    }
-    const prev = imagePreviews[obsId];
-    if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
-    const url = URL.createObjectURL(file);
-    setImagePreviews((p) => ({ ...p, [obsId]: url }));
-    updateObs(obsId, { newImageFile: file, removeImage: false });
-  };
-
-  const onRemoveImage = (obsId: string) => {
-    const prev = imagePreviews[obsId];
-    if (prev && prev.startsWith("blob:")) URL.revokeObjectURL(prev);
-    setImagePreviews((p) => {
-      const copy = { ...p };
-      delete copy[obsId];
-      return copy;
-    });
-    updateObs(obsId, { newImageFile: null, removeImage: true });
+  const onRemoveImage = (obsId: string, imageId: string) => {
+    setDraft((d) => ({
+      ...d,
+      observations: d.observations.map((o) => {
+        if (o.id !== obsId) return o;
+        const removed = o.images.find((im) => im.id === imageId);
+        if (removed) revokeBlob(removed.url);
+        return { ...o, images: o.images.filter((im) => im.id !== imageId) };
+      }),
+    }));
   };
 
   const validate = (): string | null => {
@@ -1121,240 +1148,238 @@ function ReportForm({
         </div>
 
         <div style={{ display: "grid", gap: 14 }}>
-          {draft.observations.map((obs, idx) => {
-            const previewUrl = imagePreviews[obs.id];
-            return (
+          {draft.observations.map((obs, idx) => (
+            <div
+              key={obs.id}
+              style={{
+                ...softCardStyle(),
+                padding: 16,
+                border: `1px solid ${theme.cardBorder}`,
+                display: "grid",
+                gap: 12,
+              }}
+            >
+              {/* Header */}
               <div
-                key={obs.id}
                 style={{
-                  ...softCardStyle(),
-                  padding: 16,
-                  border: `1px solid ${theme.cardBorder}`,
-                  display: "grid",
-                  gridTemplateColumns: "180px 1fr",
-                  gap: 16,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
                 }}
-                className="report-observation-row"
               >
-                {/* Image dropzone */}
-                <div>
-                  <input
-                    ref={(el) => {
-                      fileInputs.current[obs.id] = el;
+                <div
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 800,
+                    color: theme.title,
+                  }}
+                >
+                  Observation #{idx + 1}
+                </div>
+                {draft.observations.length > 1 && (
+                  <button
+                    onClick={() => removeObservation(obs.id)}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      color: "#dc2626",
+                      cursor: "pointer",
+                      fontSize: 12,
+                      fontWeight: 700,
                     }}
-                    type="file"
-                    accept="image/*"
-                    style={{ display: "none" }}
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      onPickImage(obs.id, f);
-                      e.target.value = "";
-                    }}
-                  />
-                  {previewUrl ? (
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+
+              {/* Fields */}
+              <textarea
+                value={obs.description}
+                onChange={(e) =>
+                  updateObs(obs.id, { description: e.target.value })
+                }
+                placeholder="Describe what you observed…"
+                rows={3}
+                style={{
+                  ...inputStyle(),
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                  lineHeight: 1.5,
+                }}
+              />
+              <textarea
+                value={obs.recommendation}
+                onChange={(e) =>
+                  updateObs(obs.id, { recommendation: e.target.value })
+                }
+                placeholder="Recommended action / corrective measure…"
+                rows={3}
+                style={{
+                  ...inputStyle(),
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                  lineHeight: 1.5,
+                }}
+              />
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: theme.subtleText,
+                    fontWeight: 700,
+                  }}
+                >
+                  Priority
+                </span>
+                <select
+                  value={obs.priority}
+                  onChange={(e) =>
+                    updateObs(obs.id, {
+                      priority: e.target.value as ReportPriority,
+                    })
+                  }
+                  style={{ ...selectStyle(), width: "auto", flex: 1 }}
+                >
+                  {REPORT_PRIORITIES.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <span style={priorityBadgeStyle(obs.priority)}>
+                  {obs.priority}
+                </span>
+              </div>
+
+              {/* Photos gallery */}
+              <div style={{ display: "grid", gap: 8 }}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: theme.subtleText,
+                    fontWeight: 700,
+                  }}
+                >
+                  Photos{obs.images.length > 0 ? ` (${obs.images.length})` : ""}
+                </span>
+                <input
+                  ref={(el) => {
+                    fileInputs.current[obs.id] = el;
+                  }}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    onAddImages(obs.id, e.target.files);
+                    e.target.value = "";
+                  }}
+                />
+                <div className="report-photo-grid">
+                  {obs.images.map((img, imgIdx) => (
                     <div
+                      key={img.id}
                       style={{
                         position: "relative",
                         width: "100%",
-                        height: 160,
+                        aspectRatio: "1 / 1",
                         borderRadius: 12,
                         overflow: "hidden",
                         background: "#0f172a",
+                        border: `1px solid ${theme.cardBorder}`,
                       }}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={previewUrl}
-                        alt={`Observation ${idx + 1}`}
+                        src={img.url}
+                        alt={`Observation ${idx + 1} photo ${imgIdx + 1}`}
+                        onClick={() =>
+                          setLightbox({
+                            urls: obs.images.map((im) => im.url),
+                            index: imgIdx,
+                          })
+                        }
                         style={{
                           width: "100%",
                           height: "100%",
                           objectFit: "cover",
                           display: "block",
+                          cursor: "zoom-in",
                         }}
                       />
-                      <div
+                      <button
+                        onClick={() => onRemoveImage(obs.id, img.id)}
+                        title="Remove photo"
                         style={{
                           position: "absolute",
-                          bottom: 6,
-                          left: 6,
-                          right: 6,
-                          display: "flex",
-                          gap: 6,
-                        }}
-                      >
-                        <button
-                          onClick={() =>
-                            fileInputs.current[obs.id]?.click()
-                          }
-                          style={{
-                            flex: 1,
-                            padding: "5px 8px",
-                            borderRadius: 8,
-                            border: "none",
-                            background: "rgba(15,23,42,0.78)",
-                            color: "#fff",
-                            cursor: "pointer",
-                            fontSize: 11,
-                            fontWeight: 700,
-                          }}
-                        >
-                          Replace
-                        </button>
-                        <button
-                          onClick={() => onRemoveImage(obs.id)}
-                          style={{
-                            padding: "5px 8px",
-                            borderRadius: 8,
-                            border: "none",
-                            background: "rgba(220,38,38,0.85)",
-                            color: "#fff",
-                            cursor: "pointer",
-                            fontSize: 11,
-                            fontWeight: 700,
-                          }}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => fileInputs.current[obs.id]?.click()}
-                      style={{
-                        width: "100%",
-                        height: 160,
-                        borderRadius: 12,
-                        border: `2px dashed ${theme.cardBorder}`,
-                        background: theme.inputBg,
-                        color: theme.subtleText,
-                        cursor: "pointer",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: 6,
-                        transition: "all 0.2s ease",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = "#6366f1";
-                        e.currentTarget.style.color = "#6366f1";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = theme.cardBorder;
-                        e.currentTarget.style.color = theme.subtleText;
-                      }}
-                    >
-                      <span style={{ fontSize: 28 }}>📷</span>
-                      <span style={{ fontSize: 12, fontWeight: 700 }}>
-                        Upload Image
-                      </span>
-                      <span style={{ fontSize: 10 }}>JPG / PNG • Max 8 MB</span>
-                    </button>
-                  )}
-                </div>
-
-                {/* Fields */}
-                <div style={{ display: "grid", gap: 10 }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 800,
-                        color: theme.title,
-                      }}
-                    >
-                      Observation #{idx + 1}
-                    </div>
-                    {draft.observations.length > 1 && (
-                      <button
-                        onClick={() => removeObservation(obs.id)}
-                        style={{
+                          top: 5,
+                          right: 5,
+                          width: 24,
+                          height: 24,
+                          borderRadius: 999,
                           border: "none",
-                          background: "transparent",
-                          color: "#dc2626",
+                          background: "rgba(220,38,38,0.9)",
+                          color: "#fff",
                           cursor: "pointer",
                           fontSize: 12,
-                          fontWeight: 700,
+                          fontWeight: 800,
+                          lineHeight: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
                         }}
                       >
-                        Remove
+                        ✕
                       </button>
-                    )}
-                  </div>
-                  <textarea
-                    value={obs.description}
-                    onChange={(e) =>
-                      updateObs(obs.id, { description: e.target.value })
-                    }
-                    placeholder="Describe what you observed…"
-                    rows={3}
+                    </div>
+                  ))}
+                  {/* Add tile */}
+                  <button
+                    onClick={() => fileInputs.current[obs.id]?.click()}
                     style={{
-                      ...inputStyle(),
-                      resize: "vertical",
-                      fontFamily: "inherit",
-                      lineHeight: 1.5,
-                    }}
-                  />
-                  <textarea
-                    value={obs.recommendation}
-                    onChange={(e) =>
-                      updateObs(obs.id, { recommendation: e.target.value })
-                    }
-                    placeholder="Recommended action / corrective measure…"
-                    rows={3}
-                    style={{
-                      ...inputStyle(),
-                      resize: "vertical",
-                      fontFamily: "inherit",
-                      lineHeight: 1.5,
-                    }}
-                  />
-                  <div
-                    style={{
+                      width: "100%",
+                      aspectRatio: "1 / 1",
+                      borderRadius: 12,
+                      border: `2px dashed ${theme.cardBorder}`,
+                      background: theme.inputBg,
+                      color: theme.subtleText,
+                      cursor: "pointer",
                       display: "flex",
+                      flexDirection: "column",
                       alignItems: "center",
-                      gap: 10,
+                      justifyContent: "center",
+                      gap: 4,
+                      transition: "all 0.2s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.borderColor = "#6366f1";
+                      e.currentTarget.style.color = "#6366f1";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.borderColor = theme.cardBorder;
+                      e.currentTarget.style.color = theme.subtleText;
                     }}
                   >
-                    <span
-                      style={{
-                        fontSize: 12,
-                        color: theme.subtleText,
-                        fontWeight: 700,
-                      }}
-                    >
-                      Priority
+                    <span style={{ fontSize: 24 }}>📷</span>
+                    <span style={{ fontSize: 11, fontWeight: 700 }}>
+                      {obs.images.length > 0 ? "Add more" : "Add photos"}
                     </span>
-                    <select
-                      value={obs.priority}
-                      onChange={(e) =>
-                        updateObs(obs.id, {
-                          priority: e.target.value as ReportPriority,
-                        })
-                      }
-                      style={{ ...selectStyle(), width: "auto", flex: 1 }}
-                    >
-                      {REPORT_PRIORITIES.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                    <span style={priorityBadgeStyle(obs.priority)}>
-                      {obs.priority}
-                    </span>
-                  </div>
+                  </button>
                 </div>
+                <span style={{ fontSize: 10, color: theme.subtleText }}>
+                  JPG / PNG • up to 8 MB each • select multiple at once
+                </span>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
 
         <button
@@ -1419,6 +1444,168 @@ function ReportForm({
             : "Save report"}
         </button>
       </div>
+
+      {lightbox && (
+        <ImageLightbox
+          urls={lightbox.urls}
+          index={lightbox.index}
+          onIndex={(i) => setLightbox((lb) => (lb ? { ...lb, index: i } : lb))}
+          onClose={() => setLightbox(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Fullscreen image viewer ────────────────────────────────────────────
+function ImageLightbox({
+  urls,
+  index,
+  onIndex,
+  onClose,
+}: {
+  urls: string[];
+  index: number;
+  onIndex: (i: number) => void;
+  onClose: () => void;
+}) {
+  const count = urls.length;
+  const safeIndex = Math.max(0, Math.min(index, count - 1));
+  const go = (delta: number) => onIndex((safeIndex + delta + count) % count);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowRight" && count > 1) go(1);
+      else if (e.key === "ArrowLeft" && count > 1) go(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [safeIndex, count]);
+
+  if (count === 0) return null;
+
+  const arrowStyle = (side: "left" | "right"): React.CSSProperties => ({
+    position: "absolute",
+    [side]: "max(12px, env(safe-area-inset-" + side + "))",
+    top: "50%",
+    transform: "translateY(-50%)",
+    width: 46,
+    height: 46,
+    borderRadius: 999,
+    border: "none",
+    background: "rgba(255,255,255,0.14)",
+    color: "#fff",
+    fontSize: 22,
+    fontWeight: 800,
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    backdropFilter: "blur(4px)",
+  });
+
+  return (
+    <div
+      onClick={onClose}
+      className="no-print"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 4000,
+        background: "rgba(8,12,22,0.92)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom))",
+        animation: "lightboxFade 0.18s ease",
+      }}
+    >
+      {/* Close */}
+      <button
+        onClick={onClose}
+        title="Close"
+        style={{
+          position: "absolute",
+          top: "max(14px, env(safe-area-inset-top))",
+          right: "max(14px, env(safe-area-inset-right))",
+          width: 42,
+          height: 42,
+          borderRadius: 999,
+          border: "none",
+          background: "rgba(255,255,255,0.14)",
+          color: "#fff",
+          fontSize: 20,
+          fontWeight: 800,
+          cursor: "pointer",
+          backdropFilter: "blur(4px)",
+        }}
+      >
+        ✕
+      </button>
+
+      {count > 1 && (
+        <>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              go(-1);
+            }}
+            style={arrowStyle("left")}
+          >
+            ‹
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              go(1);
+            }}
+            style={arrowStyle("right")}
+          >
+            ›
+          </button>
+        </>
+      )}
+
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={urls[safeIndex]}
+        alt={`Photo ${safeIndex + 1} of ${count}`}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: "100%",
+          maxHeight: "100%",
+          objectFit: "contain",
+          borderRadius: 8,
+          boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+        }}
+      />
+
+      {count > 1 && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "max(16px, env(safe-area-inset-bottom))",
+            left: "50%",
+            transform: "translateX(-50%)",
+            padding: "5px 12px",
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.14)",
+            color: "#fff",
+            fontSize: 12,
+            fontWeight: 700,
+            backdropFilter: "blur(4px)",
+          }}
+        >
+          {safeIndex + 1} / {count}
+        </div>
+      )}
     </div>
   );
 }
@@ -1436,6 +1623,10 @@ function ReportDetail({
   onDelete: () => void;
 }) {
   const theme = getThemePalette();
+  const [lightbox, setLightbox] = useState<{
+    urls: string[];
+    index: number;
+  } | null>(null);
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
@@ -1657,30 +1848,48 @@ function ReportDetail({
                     </span>
                   </div>
 
-                  {o.imageUrl && (
-                    <div
-                      style={{
-                        background: "#f8fafc",
-                        padding: 16,
-                        borderBottom: "1px solid #e2e8f0",
-                        textAlign: "center",
-                      }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={o.imageUrl}
-                        alt={`Observation ${idx + 1}`}
+                  {(() => {
+                    const imgs = getObservationImages(o);
+                    if (imgs.length === 0) return null;
+                    const urls = imgs.map((im) => im.url);
+                    return (
+                      <div
+                        className="report-print-gallery"
                         style={{
-                          maxWidth: "100%",
-                          maxHeight: 380,
-                          borderRadius: 8,
-                          border: "1px solid #e2e8f0",
-                          objectFit: "contain",
-                          background: "#ffffff",
+                          background: "#f8fafc",
+                          padding: 16,
+                          borderBottom: "1px solid #e2e8f0",
+                          display: "grid",
+                          gap: 12,
+                          gridTemplateColumns:
+                            imgs.length === 1
+                              ? "1fr"
+                              : "repeat(auto-fill, minmax(150px, 1fr))",
                         }}
-                      />
-                    </div>
-                  )}
+                      >
+                        {imgs.map((im, imgIdx) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={imgIdx}
+                            src={im.url}
+                            alt={`Observation ${idx + 1} photo ${imgIdx + 1}`}
+                            onClick={() =>
+                              setLightbox({ urls, index: imgIdx })
+                            }
+                            style={{
+                              width: "100%",
+                              maxHeight: imgs.length === 1 ? 380 : 200,
+                              borderRadius: 8,
+                              border: "1px solid #e2e8f0",
+                              objectFit: imgs.length === 1 ? "contain" : "cover",
+                              background: "#ffffff",
+                              cursor: "zoom-in",
+                            }}
+                          />
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   <div style={{ padding: 16, display: "grid", gap: 14 }}>
                     <LabeledBlock label="Description" value={o.description} />
@@ -1718,6 +1927,15 @@ function ReportDetail({
           </div>
         </div>
       </div>
+
+      {lightbox && (
+        <ImageLightbox
+          urls={lightbox.urls}
+          index={lightbox.index}
+          onIndex={(i) => setLightbox((lb) => (lb ? { ...lb, index: i } : lb))}
+          onClose={() => setLightbox(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1909,9 +2127,16 @@ function printReport(report: Report) {
   const observationsHtml = report.observations
     .map((o, idx) => {
       const pc = priorityColor(o.priority);
-      const img = o.imageUrl
-        ? `<div class="obs-img"><img src="${escHtml(o.imageUrl)}" alt="Observation ${idx + 1}" /></div>`
-        : "";
+      const imgs = getObservationImages(o);
+      const img =
+        imgs.length > 0
+          ? `<div class="obs-img${imgs.length > 1 ? " obs-img-grid" : ""}">${imgs
+              .map(
+                (im, i) =>
+                  `<img src="${escHtml(im.url)}" alt="Observation ${idx + 1} photo ${i + 1}" />`
+              )
+              .join("")}</div>`
+          : "";
       return `
         <section class="obs">
           <header class="obs-head">
@@ -2062,6 +2287,16 @@ function printReport(report: Report) {
     border: 1px solid #e2e8f0;
     object-fit: contain;
     background: #fff;
+  }
+  .obs-img-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .obs-img-grid img {
+    width: 100%;
+    max-height: 240px;
+    object-fit: cover;
   }
   .obs-body { padding: 12px 16px; }
   .lbl {

@@ -30,7 +30,7 @@ import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import EmployeeDashboard from "./employee-dashboard";
 import AdminDashboard from "./admin-dashboard";
 import { AssessmentDraft } from "./admin-assessments";
-import { ReportDraft } from "./admin-reports";
+import { ReportDraft, ReportDraftImage } from "./admin-reports";
 import {
   Assessment,
   AssessmentBranch,
@@ -45,6 +45,7 @@ import {
   getTodayDateString,
   Report,
   ReportObservation,
+  ReportObservationImage,
   ReportPriority,
   ReportStatus,
   setThemeMode,
@@ -1237,12 +1238,29 @@ export default function HomePage() {
           const observations: ReportObservation[] = rawObservations.map(
             (raw: unknown) => {
               const o = (raw ?? {}) as Record<string, unknown>;
+              const rawImages = Array.isArray(o.images) ? o.images : [];
+              const images: ReportObservationImage[] = [];
+              for (const rawImg of rawImages) {
+                const im = (rawImg ?? {}) as Record<string, unknown>;
+                if (typeof im.url !== "string" || !im.url) continue;
+                const entry: ReportObservationImage = { url: im.url };
+                if (typeof im.path === "string") entry.path = im.path;
+                images.push(entry);
+              }
+              const legacyUrl =
+                typeof o.imageUrl === "string" ? o.imageUrl : undefined;
+              const legacyPath =
+                typeof o.imagePath === "string" ? o.imagePath : undefined;
               return {
                 id: typeof o.id === "string" ? o.id : `obs-${Math.random()}`,
-                imageUrl:
-                  typeof o.imageUrl === "string" ? o.imageUrl : undefined,
-                imagePath:
-                  typeof o.imagePath === "string" ? o.imagePath : undefined,
+                imageUrl: legacyUrl,
+                imagePath: legacyPath,
+                images:
+                  images.length > 0
+                    ? images
+                    : legacyUrl
+                    ? [{ url: legacyUrl, path: legacyPath }]
+                    : [],
                 description:
                   typeof o.description === "string" ? o.description : "",
                 recommendation:
@@ -2247,6 +2265,26 @@ export default function HomePage() {
     return { url, path };
   };
 
+  // Uploads any new images and preserves existing ones, returning the ordered
+  // list of stored images for an observation.
+  const resolveObservationImages = async (
+    reportId: string,
+    draftImages: ReportDraftImage[]
+  ): Promise<ReportObservationImage[]> => {
+    const result: ReportObservationImage[] = [];
+    for (const img of draftImages) {
+      if (img.file) {
+        const uploaded = await uploadReportImage(reportId, img.file);
+        result.push({ url: uploaded.url, path: uploaded.path });
+      } else if (img.url) {
+        const im: ReportObservationImage = { url: img.url };
+        if (img.existingPath) im.path = img.existingPath;
+        result.push(im);
+      }
+    }
+    return result;
+  };
+
   const generateReportNumber = async (): Promise<string> => {
     return await runTransaction(db, async (tx) => {
       const counterRef = doc(db, "counters", "reportSequence");
@@ -2279,21 +2317,19 @@ export default function HomePage() {
 
     const observations: ReportObservation[] = [];
     for (const o of draft.observations) {
-      let imageUrl: string | undefined;
-      let imagePath: string | undefined;
-      if (o.newImageFile) {
-        const result = await uploadReportImage(newDocRef.id, o.newImageFile);
-        imageUrl = result.url;
-        imagePath = result.path;
-      }
+      const images = await resolveObservationImages(newDocRef.id, o.images);
       const obs: ReportObservation = {
         id: o.id,
         description: o.description.trim(),
         recommendation: o.recommendation.trim(),
         priority: o.priority,
       };
-      if (imageUrl) obs.imageUrl = imageUrl;
-      if (imagePath) obs.imagePath = imagePath;
+      if (images.length > 0) {
+        obs.images = images;
+        // Mirror the first image into legacy fields (cover thumbnail).
+        obs.imageUrl = images[0].url;
+        if (images[0].path) obs.imagePath = images[0].path;
+      }
       observations.push(obs);
     }
 
@@ -2324,24 +2360,18 @@ export default function HomePage() {
 
     const observations: ReportObservation[] = [];
     for (const o of draft.observations) {
-      let imageUrl: string | undefined;
-      let imagePath: string | undefined;
-      if (o.newImageFile) {
-        const result = await uploadReportImage(id, o.newImageFile);
-        imageUrl = result.url;
-        imagePath = result.path;
-      } else if (!o.removeImage && o.existingImageUrl) {
-        imageUrl = o.existingImageUrl;
-        imagePath = o.existingImagePath;
-      }
+      const images = await resolveObservationImages(id, o.images);
       const obs: ReportObservation = {
         id: o.id,
         description: o.description.trim(),
         recommendation: o.recommendation.trim(),
         priority: o.priority,
       };
-      if (imageUrl) obs.imageUrl = imageUrl;
-      if (imagePath) obs.imagePath = imagePath;
+      if (images.length > 0) {
+        obs.images = images;
+        obs.imageUrl = images[0].url;
+        if (images[0].path) obs.imagePath = images[0].path;
+      }
       observations.push(obs);
     }
 

@@ -181,14 +181,36 @@ export type ReportPriority = "Low" | "Medium" | "High" | "Critical";
 
 export type ReportBranch = "PS Muraqqabat" | "PS Karama";
 
+export type ReportObservationImage = {
+  url: string;
+  path?: string;
+};
+
 export type ReportObservation = {
   id: string;
+  // Legacy single-image fields — kept for backward compatibility and as the
+  // cover thumbnail. New reports populate `images` instead.
   imageUrl?: string;
   imagePath?: string;
+  images?: ReportObservationImage[];
   description: string;
   recommendation: string;
   priority: ReportPriority;
 };
+
+// Normalizes an observation's images into a single ordered list, transparently
+// upgrading legacy single-image records (imageUrl/imagePath) to the new shape.
+export function getObservationImages(
+  o: Pick<ReportObservation, "images" | "imageUrl" | "imagePath">
+): ReportObservationImage[] {
+  if (Array.isArray(o.images) && o.images.length > 0) {
+    return o.images.filter((im) => im && typeof im.url === "string" && im.url);
+  }
+  if (o.imageUrl) {
+    return [{ url: o.imageUrl, path: o.imagePath }];
+  }
+  return [];
+}
 
 export type Report = {
   id: string;
