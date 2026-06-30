@@ -30,7 +30,7 @@ import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import EmployeeDashboard from "./employee-dashboard";
 import AdminDashboard from "./admin-dashboard";
 import { AssessmentDraft } from "./admin-assessments";
-import { ReportDraft, ReportDraftImage } from "./admin-reports";
+import { ReportDraft, SaveProgress } from "./admin-reports";
 import {
   Assessment,
   AssessmentBranch,
@@ -61,6 +61,49 @@ import {
   mapLegacySingleFile,
   mapLegacySingleSubmittedFile,
 } from "./portal-utils";
+
+// Client-side image compression — downscale large photos and re-encode as JPEG
+// before upload. Cuts upload time and storage dramatically with no visible
+// quality loss. Falls back to the original file if compression yields no gain.
+async function compressImage(file: File): Promise<File> {
+  if (
+    typeof document === "undefined" ||
+    !file.type.startsWith("image/") ||
+    file.type === "image/gif" ||
+    file.type === "image/svg+xml"
+  ) {
+    return file;
+  }
+  if (file.size < 300 * 1024) return file; // already small enough
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxDim = 1600;
+    let { width, height } = bitmap;
+    if (width > maxDim || height > maxDim) {
+      const scale = Math.min(maxDim / width, maxDim / height);
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bitmap.close?.();
+      return file;
+    }
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close?.();
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.82)
+    );
+    if (!blob || blob.size >= file.size) return file; // no benefit
+    const newName = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], newName, { type: "image/jpeg" });
+  } catch {
+    return file; // any failure → upload original untouched
+  }
+}
 
 type BirthdayEntry = {
   id: string;
@@ -2265,24 +2308,61 @@ export default function HomePage() {
     return { url, path };
   };
 
-  // Uploads any new images and preserves existing ones, returning the ordered
-  // list of stored images for an observation.
-  const resolveObservationImages = async (
+  // Builds the stored observation list: compresses + uploads all new images
+  // across every observation in parallel (much faster than sequential), keeps
+  // existing images, and reports upload progress.
+  const buildObservations = async (
     reportId: string,
-    draftImages: ReportDraftImage[]
-  ): Promise<ReportObservationImage[]> => {
-    const result: ReportObservationImage[] = [];
-    for (const img of draftImages) {
-      if (img.file) {
-        const uploaded = await uploadReportImage(reportId, img.file);
-        result.push({ url: uploaded.url, path: uploaded.path });
-      } else if (img.url) {
-        const im: ReportObservationImage = { url: img.url };
-        if (img.existingPath) im.path = img.existingPath;
-        result.push(im);
+    draftObs: ReportDraft["observations"],
+    onProgress?: SaveProgress
+  ): Promise<ReportObservation[]> => {
+    const total = draftObs.reduce(
+      (n, o) => n + o.images.filter((im) => im.file).length,
+      0
+    );
+    let done = 0;
+    onProgress?.(0, total);
+
+    const uploaded = new Map<string, { url: string; path: string }>();
+    await Promise.all(
+      draftObs.flatMap((o) =>
+        o.images
+          .filter((im) => im.file)
+          .map(async (im) => {
+            const compressed = await compressImage(im.file as File);
+            const res = await uploadReportImage(reportId, compressed);
+            uploaded.set(im.id, res);
+            done += 1;
+            onProgress?.(done, total);
+          })
+      )
+    );
+
+    return draftObs.map((o) => {
+      const images: ReportObservationImage[] = [];
+      for (const im of o.images) {
+        if (im.file) {
+          const res = uploaded.get(im.id);
+          if (res) images.push({ url: res.url, path: res.path });
+        } else if (im.url) {
+          const entry: ReportObservationImage = { url: im.url };
+          if (im.existingPath) entry.path = im.existingPath;
+          images.push(entry);
+        }
       }
-    }
-    return result;
+      const obs: ReportObservation = {
+        id: o.id,
+        description: o.description.trim(),
+        recommendation: o.recommendation.trim(),
+        priority: o.priority,
+      };
+      if (images.length > 0) {
+        obs.images = images;
+        obs.imageUrl = images[0].url;
+        if (images[0].path) obs.imagePath = images[0].path;
+      }
+      return obs;
+    });
   };
 
   const generateReportNumber = async (): Promise<string> => {
@@ -2308,30 +2388,17 @@ export default function HomePage() {
   };
 
   const createReport = async (
-    draft: ReportDraft
+    draft: ReportDraft,
+    onProgress?: SaveProgress
   ): Promise<{ id: string; reportNumber: string }> => {
     if (!currentUser) throw new Error("Not signed in.");
 
     const newDocRef = doc(collection(db, "reports"));
-    const reportNumber = await generateReportNumber();
-
-    const observations: ReportObservation[] = [];
-    for (const o of draft.observations) {
-      const images = await resolveObservationImages(newDocRef.id, o.images);
-      const obs: ReportObservation = {
-        id: o.id,
-        description: o.description.trim(),
-        recommendation: o.recommendation.trim(),
-        priority: o.priority,
-      };
-      if (images.length > 0) {
-        obs.images = images;
-        // Mirror the first image into legacy fields (cover thumbnail).
-        obs.imageUrl = images[0].url;
-        if (images[0].path) obs.imagePath = images[0].path;
-      }
-      observations.push(obs);
-    }
+    // Run image processing and report-number allocation concurrently.
+    const [observations, reportNumber] = await Promise.all([
+      buildObservations(newDocRef.id, draft.observations, onProgress),
+      generateReportNumber(),
+    ]);
 
     await setDoc(newDocRef, {
       reportNumber,
@@ -2354,26 +2421,16 @@ export default function HomePage() {
 
   const updateReport = async (
     id: string,
-    draft: ReportDraft
+    draft: ReportDraft,
+    onProgress?: SaveProgress
   ): Promise<void> => {
     if (!currentUser) throw new Error("Not signed in.");
 
-    const observations: ReportObservation[] = [];
-    for (const o of draft.observations) {
-      const images = await resolveObservationImages(id, o.images);
-      const obs: ReportObservation = {
-        id: o.id,
-        description: o.description.trim(),
-        recommendation: o.recommendation.trim(),
-        priority: o.priority,
-      };
-      if (images.length > 0) {
-        obs.images = images;
-        obs.imageUrl = images[0].url;
-        if (images[0].path) obs.imagePath = images[0].path;
-      }
-      observations.push(obs);
-    }
+    const observations = await buildObservations(
+      id,
+      draft.observations,
+      onProgress
+    );
 
     await updateDoc(doc(db, "reports", id), {
       title: draft.title.trim(),

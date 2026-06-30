@@ -740,8 +740,8 @@ function GenerateFromFileModal({
         </div>
 
         <p style={{ fontSize: 13, color: theme.subtleText, lineHeight: 1.7, marginTop: 0 }}>
-          Upload a PDF or image. The AI will read it and propose a quiz draft. Nothing is published
-          until you review and approve.
+          Upload a PDF or image. The AI will read it and propose an assessment draft. Nothing is
+          published until you review and approve.
         </p>
 
         <input
@@ -1041,7 +1041,7 @@ function AssessmentEditor({
                   value={draft.title}
                   onChange={(e) => setField("title", e.target.value)}
                   style={inputStyle()}
-                  placeholder="e.g. Onboarding Quiz"
+                  placeholder="e.g. Onboarding Assessment"
                 />
               </div>
               <div>

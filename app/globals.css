@@ -52,6 +52,7 @@ html {
 
 /* ─── Reports page ──────────────────────────────────── */
 .reports-filter-grid    { grid-template-columns: 2fr 1fr 1fr 1fr 1fr; }
+.reports-stat-grid      { grid-template-columns: repeat(4, 1fr); }
 .report-observation-row { grid-template-columns: 180px 1fr; }
 .report-info-grid       { grid-template-columns: repeat(3, 1fr); }
 .report-photo-grid {
@@ -149,6 +150,8 @@ html {
   .report-observation-row { grid-template-columns: 1fr !important; }
   .report-info-grid       { grid-template-columns: 1fr 1fr !important; }
   .report-photo-grid      { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)) !important; }
+  .reports-stat-grid      { grid-template-columns: repeat(2, 1fr) !important; }
+  .reports-filter-grid    { grid-template-columns: 1fr 1fr !important; }
 
   /* Full Assessments Report — table → cards swap on mobile */
   .full-report-stats          { grid-template-columns: repeat(2, 1fr) !important; }

@@ -46,6 +46,10 @@ export type ReportObservationDraft = {
   images: ReportDraftImage[];
 };
 
+// Reports upload progress while saving: how many images have finished
+// uploading out of the total to upload.
+export type SaveProgress = (uploaded: number, total: number) => void;
+
 export type ReportDraft = {
   title: string;
   branchName: string;
@@ -67,9 +71,14 @@ type AdminReportsProps = {
   loading: boolean;
   currentUserName: string;
   onCreateReport: (
-    draft: ReportDraft
+    draft: ReportDraft,
+    onProgress?: SaveProgress
   ) => Promise<{ id: string; reportNumber: string }>;
-  onUpdateReport: (id: string, draft: ReportDraft) => Promise<void>;
+  onUpdateReport: (
+    id: string,
+    draft: ReportDraft,
+    onProgress?: SaveProgress
+  ) => Promise<void>;
   onSoftDeleteReport: (id: string, title: string) => void;
   showToast: (type: ToastType, message: string) => void;
 };
@@ -351,10 +360,9 @@ export default function AdminReports({
 
         {/* Stats */}
         <div
-          className="stat-grid-3col"
+          className="reports-stat-grid"
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
             gap: 14,
           }}
         >
@@ -385,7 +393,6 @@ export default function AdminReports({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr",
               gap: 10,
             }}
             className="reports-filter-grid"
@@ -541,25 +548,15 @@ export default function AdminReports({
         }
         editingReportNumber={editing?.reportNumber}
         onCancel={() => setMode({ kind: "list" })}
-        onSave={async (draft) => {
-          try {
-            if (editing) {
-              await onUpdateReport(editing.id, draft);
-              showToast("success", `Report ${editing.reportNumber} updated.`);
-              setMode({ kind: "view", reportId: editing.id });
-            } else {
-              const result = await onCreateReport(draft);
-              showToast(
-                "success",
-                `Report ${result.reportNumber} created.`
-              );
-              setMode({ kind: "view", reportId: result.id });
-            }
-          } catch (err) {
-            console.error(err);
-            const msg =
-              err instanceof Error ? err.message : "Could not save report.";
-            showToast("error", msg);
+        onSave={async (draft, onProgress) => {
+          if (editing) {
+            await onUpdateReport(editing.id, draft, onProgress);
+            showToast("success", `Report ${editing.reportNumber} updated.`);
+            setMode({ kind: "view", reportId: editing.id });
+          } else {
+            const result = await onCreateReport(draft, onProgress);
+            showToast("success", `Report ${result.reportNumber} created.`);
+            setMode({ kind: "view", reportId: result.id });
           }
         }}
         showToast={showToast}
@@ -822,12 +819,17 @@ function ReportForm({
   initial: ReportDraft;
   editingReportNumber?: string;
   onCancel: () => void;
-  onSave: (draft: ReportDraft) => Promise<void>;
+  onSave: (draft: ReportDraft, onProgress?: SaveProgress) => Promise<void>;
   showToast: (type: ToastType, message: string) => void;
 }) {
   const theme = getThemePalette();
   const [draft, setDraft] = useState<ReportDraft>(initial);
   const [saving, setSaving] = useState(false);
+  // Upload progress while saving (null when not uploading any images).
+  const [uploadInfo, setUploadInfo] = useState<{
+    uploaded: number;
+    total: number;
+  } | null>(null);
   // Fullscreen viewer for the images of a single observation while editing.
   const [lightbox, setLightbox] = useState<{
     urls: string[];
@@ -948,18 +950,41 @@ function ReportForm({
   };
 
   const submit = async () => {
+    if (saving) return; // guard against double-submit
     const err = validate();
     if (err) {
       showToast("error", err);
       return;
     }
     setSaving(true);
+    setUploadInfo(null);
     try {
-      await onSave(draft);
+      await onSave(draft, (uploaded, total) => {
+        // Only surface a progress bar when there are images to upload.
+        setUploadInfo(total > 0 ? { uploaded, total } : null);
+      });
+      // Draft is intentionally left intact; parent navigates away on success.
+    } catch (e) {
+      const msg =
+        e instanceof Error ? e.message : "Could not save report. Try again.";
+      showToast("error", msg);
+      // Data is preserved — the user stays on the form to retry.
     } finally {
       setSaving(false);
+      setUploadInfo(null);
     }
   };
+
+  const saveLabel = saving
+    ? uploadInfo
+      ? `Uploading ${uploadInfo.uploaded}/${uploadInfo.total}…`
+      : "Saving…"
+    : editingReportNumber
+    ? "Save changes"
+    : "Save report";
+  const uploadPct = uploadInfo
+    ? Math.round((uploadInfo.uploaded / Math.max(uploadInfo.total, 1)) * 100)
+    : 0;
 
   return (
     <div style={{ display: "grid", gap: 22 }}>
@@ -1024,14 +1049,12 @@ function ReportForm({
                 "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
               color: "#fff",
               boxShadow: "0 10px 22px rgba(99,102,241,0.32)",
-              opacity: saving ? 0.7 : 1,
+              opacity: saving ? 0.8 : 1,
+              cursor: saving ? "progress" : "pointer",
+              minWidth: 130,
             }}
           >
-            {saving
-              ? "Saving…"
-              : editingReportNumber
-              ? "Save changes"
-              : "Save report"}
+            {saveLabel}
           </button>
         </div>
       </div>
@@ -1410,6 +1433,45 @@ function ReportForm({
         </button>
       </div>
 
+      {/* Upload progress bar (only while uploading images) */}
+      {saving && uploadInfo && (
+        <div style={{ display: "grid", gap: 6 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: 12,
+              fontWeight: 700,
+              color: theme.subtleText,
+            }}
+          >
+            <span>Uploading photos…</span>
+            <span>
+              {uploadInfo.uploaded}/{uploadInfo.total} • {uploadPct}%
+            </span>
+          </div>
+          <div
+            style={{
+              height: 8,
+              borderRadius: 999,
+              background: theme.inputBg,
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${uploadPct}%`,
+                height: "100%",
+                borderRadius: 999,
+                background:
+                  "linear-gradient(90deg, #6366f1 0%, #4f46e5 100%)",
+                transition: "width 0.25s ease",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Sticky bottom actions */}
       <div
         style={{
@@ -1434,14 +1496,12 @@ function ReportForm({
             background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
             color: "#fff",
             boxShadow: "0 10px 22px rgba(99,102,241,0.32)",
-            opacity: saving ? 0.7 : 1,
+            opacity: saving ? 0.8 : 1,
+            cursor: saving ? "progress" : "pointer",
+            minWidth: 130,
           }}
         >
-          {saving
-            ? "Saving…"
-            : editingReportNumber
-            ? "Save changes"
-            : "Save report"}
+          {saveLabel}
         </button>
       </div>
 
@@ -1755,7 +1815,6 @@ function ReportDetail({
           style={{
             padding: "24px 32px",
             display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
             gap: 14,
             borderBottom: "1px solid #e2e8f0",
             background: "#fafafa",
@@ -1873,6 +1932,8 @@ function ReportDetail({
                             key={imgIdx}
                             src={im.url}
                             alt={`Observation ${idx + 1} photo ${imgIdx + 1}`}
+                            loading="lazy"
+                            decoding="async"
                             onClick={() =>
                               setLightbox({ urls, index: imgIdx })
                             }
@@ -2124,31 +2185,38 @@ function printReport(report: Report) {
   const overallP = priorityColor(report.priority);
   const overallS = statusColor(report.status);
 
+  const total = report.observations.length;
   const observationsHtml = report.observations
     .map((o, idx) => {
       const pc = priorityColor(o.priority);
       const imgs = getObservationImages(o);
-      const img =
+      const photos =
         imgs.length > 0
-          ? `<div class="obs-img${imgs.length > 1 ? " obs-img-grid" : ""}">${imgs
+          ? `<div class="obs-photos${imgs.length > 1 ? " multi" : ""}">${imgs
               .map(
                 (im, i) =>
-                  `<img src="${escHtml(im.url)}" alt="Observation ${idx + 1} photo ${i + 1}" />`
+                  `<figure class="photo"><img src="${escHtml(im.url)}" alt="Observation ${idx + 1} photo ${i + 1}" loading="eager" /></figure>`
               )
               .join("")}</div>`
           : "";
       return `
-        <section class="obs">
-          <header class="obs-head">
-            <div class="obs-no">OBSERVATION #${String(idx + 1).padStart(2, "0")}</div>
-            <span class="pill" style="background:${pc.bg};color:${pc.fg};border-color:${pc.bd}">${escHtml(o.priority)} Priority</span>
-          </header>
-          ${img}
-          <div class="obs-body">
-            <div class="lbl">Description</div>
-            <div class="val">${escHtml(o.description).replace(/\n/g, "<br>")}</div>
-            <div class="lbl lbl-accent">Recommendation / Corrective Action</div>
-            <div class="val val-accent">${escHtml(o.recommendation).replace(/\n/g, "<br>") || "—"}</div>
+        <section class="obs-page">
+          <div class="obs-card">
+            <header class="obs-head">
+              <div class="obs-no">OBSERVATION ${String(idx + 1).padStart(2, "0")} <span class="obs-of">of ${String(total).padStart(2, "0")}</span></div>
+              <span class="pill" style="background:${pc.bg};color:${pc.fg};border-color:${pc.bd}">${escHtml(o.priority)} Priority</span>
+            </header>
+            ${photos}
+            <div class="obs-body">
+              <div class="block">
+                <div class="lbl">Description</div>
+                <div class="val">${escHtml(o.description).replace(/\n/g, "<br>") || "—"}</div>
+              </div>
+              <div class="block">
+                <div class="lbl lbl-accent">Recommendation / Corrective Action</div>
+                <div class="val val-accent">${escHtml(o.recommendation).replace(/\n/g, "<br>") || "—"}</div>
+              </div>
+            </div>
           </div>
         </section>
       `;
@@ -2161,7 +2229,7 @@ function printReport(report: Report) {
 <meta charset="utf-8" />
 <title>${escHtml(report.reportNumber)} — ${escHtml(report.title)}</title>
 <style>
-  @page { size: A4; margin: 14mm; }
+  @page { size: A4; margin: 16mm 14mm 22mm 14mm; }
   * { box-sizing: border-box; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -2251,82 +2319,127 @@ function printReport(report: Report) {
     margin: 8px 0 14px 0;
     text-transform: uppercase;
   }
-  .obs {
+  /* ── Cover page ───────────────────────────────── */
+  .cover {
+    page-break-after: always;
+    break-after: page;
+    display: flex;
+    flex-direction: column;
+  }
+  .cover-spacer { flex: 1 1 auto; min-height: 30px; }
+  .cover-note {
+    margin-top: 18px;
+    text-align: center;
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.6;
+  }
+  .cover-count {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 7px 16px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #3730a3;
+    font-size: 12px;
+    font-weight: 800;
+    border: 1px solid #c7d2fe;
+  }
+  /* ── Observation pages ────────────────────────── */
+  .obs-page {
+    page-break-before: always;
+    break-before: page;
+  }
+  .obs-card {
     border: 1px solid #e2e8f0;
-    border-radius: 10px;
+    border-radius: 12px;
     overflow: hidden;
     background: #fff;
-    margin-bottom: 14px;
-    page-break-inside: avoid;
-    break-inside: avoid;
   }
   .obs-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 14px;
-    background: #f1f5f9;
-    border-bottom: 1px solid #e2e8f0;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #0f1c35;
+    color: #fff;
+    page-break-after: avoid;
+    break-after: avoid;
   }
   .obs-no {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 900;
-    color: #0f172a;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
   }
-  .obs-img {
+  .obs-of { font-weight: 700; color: #cbd5e1; font-size: 11px; }
+  .obs-photos {
     background: #f8fafc;
     padding: 14px;
     border-bottom: 1px solid #e2e8f0;
-    text-align: center;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    justify-items: center;
   }
-  .obs-img img {
+  .obs-photos.multi { grid-template-columns: repeat(2, 1fr); }
+  .photo {
+    margin: 0;
+    width: 100%;
+    text-align: center;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .photo img {
     max-width: 100%;
-    max-height: 360px;
-    border-radius: 6px;
+    max-height: 150mm;
+    width: auto;
+    height: auto;
+    border-radius: 8px;
     border: 1px solid #e2e8f0;
     object-fit: contain;
     background: #fff;
   }
-  .obs-img-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
+  .obs-photos.multi .photo img { max-height: 95mm; }
+  .obs-body { padding: 16px; }
+  .block {
+    page-break-inside: avoid;
+    break-inside: avoid;
   }
-  .obs-img-grid img {
-    width: 100%;
-    max-height: 240px;
-    object-fit: cover;
-  }
-  .obs-body { padding: 12px 16px; }
+  .block + .block { margin-top: 14px; }
   .lbl {
     font-size: 9px;
     font-weight: 800;
     color: #64748b;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    margin: 6px 0 4px 0;
+    margin: 0 0 5px 0;
   }
   .lbl-accent { color: #4338ca; }
   .val {
-    font-size: 12px;
+    font-size: 12.5px;
     color: #0f172a;
-    line-height: 1.55;
+    line-height: 1.6;
     white-space: pre-wrap;
   }
   .val-accent {
     background: #eef2ff;
-    padding: 8px 10px;
+    padding: 10px 12px;
     border-radius: 6px;
     border-left: 3px solid #4338ca;
   }
-  .footer {
-    margin-top: 22px;
-    border-top: 2px solid #1e293b;
-    padding-top: 10px;
+  /* ── Repeating page footer (sits inside reserved bottom margin) ── */
+  .page-footer {
+    position: fixed;
+    bottom: 8mm;
+    left: 14mm;
+    right: 14mm;
+    border-top: 1.5px solid #1e293b;
+    padding-top: 6px;
     display: flex;
     justify-content: space-between;
-    font-size: 10px;
+    gap: 10px;
+    font-size: 9.5px;
     color: #475569;
   }
   .print-bar {
@@ -2337,14 +2450,13 @@ function printReport(report: Report) {
     gap: 10px;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 16px;
+    padding: 12px max(16px, env(safe-area-inset-right)) 12px max(16px, env(safe-area-inset-left));
+    padding-top: max(12px, env(safe-area-inset-top));
     background: #0f1c35;
     color: #fff;
-    margin: -14mm -14mm 16px -14mm;
-    padding-left: max(16px, env(safe-area-inset-left));
-    padding-right: max(16px, env(safe-area-inset-right));
-    padding-top: max(12px, env(safe-area-inset-top));
+    margin-bottom: 18px;
   }
+  @media screen { .page-footer { display: none; } }
   .print-bar button {
     border: none;
     border-radius: 10px;
@@ -2360,39 +2472,52 @@ function printReport(report: Report) {
     body { background: #fff; }
     .doc { max-width: none; padding: 0; }
     .print-bar { display: none !important; }
+    .cover { min-height: calc(297mm - 16mm - 22mm); }
   }
 </style>
 </head>
 <body>
+  <div class="print-bar">
+    <button type="button" class="pb-back" onclick="closeReport()">← Back</button>
+    <button type="button" class="pb-print" onclick="window.print()">🖨 Print / Save PDF</button>
+  </div>
+
+  <div class="page-footer">
+    <div>Generated by ${escHtml(report.createdByName)} • ${escHtml(formatDateTime(report.createdAt) || "—")}</div>
+    <div>Emirates International Holding Group © ${year}</div>
+  </div>
+
   <div class="doc">
-    <div class="print-bar">
-      <button type="button" class="pb-back" onclick="closeReport()">← Back</button>
-      <button type="button" class="pb-print" onclick="window.print()">🖨 Print / Save PDF</button>
-    </div>
-    <div class="letterhead">
-      <div class="official-tag">✦ OFFICIAL DOCUMENT ✦</div>
-      <div class="brand-1">EMIRATES INTERNATIONAL HOLDING GROUP</div>
-      <div class="brand-2">Philippine Supermarket</div>
-      <div class="doc-title">FIELD VISIT REPORT</div>
+    <!-- ── Cover page ── -->
+    <div class="cover">
+      <div class="letterhead">
+        <div class="official-tag">✦ OFFICIAL DOCUMENT ✦</div>
+        <div class="brand-1">EMIRATES INTERNATIONAL HOLDING GROUP</div>
+        <div class="brand-2">Philippine Supermarket</div>
+        <div class="doc-title">FIELD VISIT REPORT</div>
+      </div>
+
+      <div class="info">
+        <div><div class="k">Report No.</div><div class="v mono">${escHtml(report.reportNumber)}</div></div>
+        <div><div class="k">Branch</div><div class="v">${escHtml(report.branchName)}</div></div>
+        <div><div class="k">Date of Visit</div><div class="v">${escHtml(report.visitDate)}</div></div>
+        <div><div class="k">Prepared By</div><div class="v">${escHtml(report.preparedBy)}</div></div>
+        <div><div class="k">Status</div><div class="v"><span class="pill" style="background:${overallS.bg};color:${overallS.fg};border-color:${overallS.bd}">${escHtml(report.status)}</span></div></div>
+        <div><div class="k">Overall Priority</div><div class="v"><span class="pill" style="background:${overallP.bg};color:${overallP.fg};border-color:${overallP.bd}">${escHtml(report.priority)}</span></div></div>
+        <div class="wide"><div class="k">Title</div><div class="v">${escHtml(report.title)}</div></div>
+      </div>
+
+      <div class="cover-spacer"></div>
+
+      <div class="cover-note">
+        This document contains confidential field-visit findings and recommended corrective actions.
+        <br />
+        <span class="cover-count">${total} Observation${total === 1 ? "" : "s"} Recorded</span>
+      </div>
     </div>
 
-    <div class="info">
-      <div><div class="k">Report No.</div><div class="v mono">${escHtml(report.reportNumber)}</div></div>
-      <div><div class="k">Branch</div><div class="v">${escHtml(report.branchName)}</div></div>
-      <div><div class="k">Date of Visit</div><div class="v">${escHtml(report.visitDate)}</div></div>
-      <div><div class="k">Prepared By</div><div class="v">${escHtml(report.preparedBy)}</div></div>
-      <div><div class="k">Status</div><div class="v"><span class="pill" style="background:${overallS.bg};color:${overallS.fg};border-color:${overallS.bd}">${escHtml(report.status)}</span></div></div>
-      <div><div class="k">Overall Priority</div><div class="v"><span class="pill" style="background:${overallP.bg};color:${overallP.fg};border-color:${overallP.bd}">${escHtml(report.priority)}</span></div></div>
-      <div class="wide"><div class="k">Title</div><div class="v">${escHtml(report.title)}</div></div>
-    </div>
-
-    <div class="section-title">Observations &amp; Findings</div>
+    <!-- ── Observation pages ── -->
     ${observationsHtml || '<div style="padding:14px;background:#f8fafc;border-radius:8px;color:#64748b;font-size:12px;text-align:center;">No observations recorded.</div>'}
-
-    <div class="footer">
-      <div>Generated by ${escHtml(report.createdByName)} • ${escHtml(formatDateTime(report.createdAt) || "—")}</div>
-      <div>Emirates International Holding Group © ${year}</div>
-    </div>
   </div>
   <script>
     function closeReport() {
