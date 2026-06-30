@@ -2186,13 +2186,61 @@ function printReport(report: Report) {
   const overallS = statusColor(report.status);
 
   const total = report.observations.length;
+  const generatedAt = formatDateTime(report.createdAt) || "—";
+  const logoUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/eihg-logo.jpeg`
+      : "/eihg-logo.jpeg";
+
+  // Priority distribution for the executive summary.
+  const order: ReportPriority[] = ["Critical", "High", "Medium", "Low"];
+  const counts: Record<ReportPriority, number> = {
+    Critical: 0,
+    High: 0,
+    Medium: 0,
+    Low: 0,
+  };
+  report.observations.forEach((o) => {
+    counts[o.priority] = (counts[o.priority] || 0) + 1;
+  });
+  // Cover = page 1, Executive Summary = page 2, observations start at page 3.
+  const pageOf = (idx: number) => idx + 3;
+
+  const priorityBars = order
+    .map((p) => {
+      const n = counts[p];
+      const pct = total > 0 ? Math.round((n / total) * 100) : 0;
+      const c = priorityColor(p);
+      return `
+        <div class="bar-row">
+          <div class="bar-label"><span class="dot" style="background:${c.fg}"></span>${p}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${c.fg}"></div></div>
+          <div class="bar-count">${n}</div>
+        </div>`;
+    })
+    .join("");
+
+  const summaryRows = report.observations
+    .map((o, idx) => {
+      const c = priorityColor(o.priority);
+      return `
+        <tr>
+          <td class="t-no">${String(idx + 1).padStart(2, "0")}</td>
+          <td><span class="pill" style="background:${c.bg};color:${c.fg};border-color:${c.bd}">${escHtml(o.priority)}</span></td>
+          <td class="t-pg">${pageOf(idx)}</td>
+        </tr>`;
+    })
+    .join("");
+
   const observationsHtml = report.observations
     .map((o, idx) => {
       const pc = priorityColor(o.priority);
       const imgs = getObservationImages(o);
+      const layout =
+        imgs.length === 1 ? "one" : imgs.length === 2 ? "two" : "grid";
       const photos =
         imgs.length > 0
-          ? `<div class="obs-photos${imgs.length > 1 ? " multi" : ""}">${imgs
+          ? `<div class="obs-photos ${layout}">${imgs
               .map(
                 (im, i) =>
                   `<figure class="photo"><img src="${escHtml(im.url)}" alt="Observation ${idx + 1} photo ${i + 1}" loading="eager" /></figure>`
@@ -2201,21 +2249,19 @@ function printReport(report: Report) {
           : "";
       return `
         <section class="obs-page">
-          <div class="obs-card">
-            <header class="obs-head">
-              <div class="obs-no">OBSERVATION ${String(idx + 1).padStart(2, "0")} <span class="obs-of">of ${String(total).padStart(2, "0")}</span></div>
-              <span class="pill" style="background:${pc.bg};color:${pc.fg};border-color:${pc.bd}">${escHtml(o.priority)} Priority</span>
-            </header>
-            ${photos}
-            <div class="obs-body">
-              <div class="block">
-                <div class="lbl">Description</div>
-                <div class="val">${escHtml(o.description).replace(/\n/g, "<br>") || "—"}</div>
-              </div>
-              <div class="block">
-                <div class="lbl lbl-accent">Recommendation / Corrective Action</div>
-                <div class="val val-accent">${escHtml(o.recommendation).replace(/\n/g, "<br>") || "—"}</div>
-              </div>
+          <header class="obs-head">
+            <div class="obs-no">OBSERVATION <span class="obs-num">${String(idx + 1).padStart(2, "0")}</span> <span class="obs-of">/ ${String(total).padStart(2, "0")}</span></div>
+            <span class="pill" style="background:${pc.bg};color:${pc.fg};border-color:${pc.bd}">${escHtml(o.priority)} Priority</span>
+          </header>
+          ${photos}
+          <div class="obs-body">
+            <div class="block">
+              <div class="lbl">Description</div>
+              <div class="val">${escHtml(o.description).replace(/\n/g, "<br>") || "—"}</div>
+            </div>
+            <div class="rec">
+              <div class="rec-head"><span class="rec-icon">💡</span>Recommendation / Corrective Action</div>
+              <div class="rec-body">${escHtml(o.recommendation).replace(/\n/g, "<br>") || "—"}</div>
             </div>
           </div>
         </section>
@@ -2241,68 +2287,9 @@ function printReport(report: Report) {
     print-color-adjust: exact;
   }
   .doc { max-width: 780px; margin: 0 auto; padding: 0 4px; }
-  .letterhead {
-    text-align: center;
-    border-bottom: 3px double #1e293b;
-    padding: 6px 0 18px 0;
-    margin-bottom: 18px;
-  }
-  .official-tag {
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.3em;
-    color: #64748b;
-    margin-bottom: 6px;
-  }
-  .brand-1 {
-    font-size: 22px;
-    font-weight: 900;
-    color: #0f172a;
-    letter-spacing: 0.05em;
-    line-height: 1.2;
-  }
-  .brand-2 {
-    font-size: 14px;
-    font-weight: 700;
-    color: #4338ca;
-    font-style: italic;
-    margin-top: 4px;
-  }
-  .doc-title {
-    margin-top: 14px;
-    display: inline-block;
-    font-size: 16px;
-    font-weight: 900;
-    color: #0f172a;
-    letter-spacing: 0.18em;
-    padding: 6px 14px;
-    border-top: 1px solid #cbd5e1;
-    border-bottom: 1px solid #cbd5e1;
-  }
-  .info {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 14px 18px;
-    padding: 14px 18px;
-    background: #f8fafc;
-    border-radius: 8px;
-    border: 1px solid #e2e8f0;
-    margin-bottom: 18px;
-  }
-  .info .wide { grid-column: 1 / -1; }
-  .info .k {
-    font-size: 9px;
-    font-weight: 800;
-    color: #64748b;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 3px;
-  }
-  .info .v { font-size: 13px; font-weight: 700; color: #0f172a; }
-  .info .v.mono { font-family: "Courier New", monospace; }
   .pill {
     display: inline-block;
-    padding: 3px 9px;
+    padding: 3px 10px;
     border-radius: 999px;
     font-size: 10px;
     font-weight: 800;
@@ -2313,135 +2300,283 @@ function printReport(report: Report) {
     font-size: 13px;
     font-weight: 900;
     color: #0f172a;
-    letter-spacing: 0.08em;
-    border-left: 4px solid #4338ca;
-    padding-left: 10px;
-    margin: 8px 0 14px 0;
-    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-left: 4px solid #6366f1;
+    padding-left: 11px;
+    margin: 0 0 14px 0;
   }
-  /* ── Cover page ───────────────────────────────── */
+
+  /* ── Cover page (executive navy + gold) ───────── */
   .cover {
     page-break-after: always;
     break-after: page;
+    background: linear-gradient(160deg, #0a1628 0%, #0f1c35 55%, #1b2a4a 100%);
+    color: #e2e8f0;
+    border-radius: 16px;
+    border-top: 5px solid #f0c040;
+    padding: 38px 40px 30px;
     display: flex;
     flex-direction: column;
-  }
-  .cover-spacer { flex: 1 1 auto; min-height: 30px; }
-  .cover-note {
-    margin-top: 18px;
     text-align: center;
-    font-size: 11px;
-    color: #64748b;
+    overflow: hidden;
+  }
+  .cover-logo {
+    background: #fff;
+    border-radius: 12px;
+    padding: 12px 18px;
+    display: inline-block;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  }
+  .cover-logo img { height: 48px; width: auto; display: block; }
+  .cover-tag {
+    margin-top: 22px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.34em;
+    color: #f0c040;
+  }
+  .cover-brand-1 {
+    margin-top: 8px;
+    font-size: 21px;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    color: #fff;
+    line-height: 1.25;
+  }
+  .cover-brand-2 {
+    font-size: 13px;
+    font-weight: 700;
+    color: #c7d2fe;
+    font-style: italic;
+    margin-top: 5px;
+  }
+  .cover-hero {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 24px 0;
+  }
+  .cover-rule { width: 64px; height: 2px; background: rgba(240,192,64,0.7); margin: 0 auto 20px; }
+  .cover-title {
+    font-size: 30px;
+    font-weight: 900;
+    letter-spacing: 0.16em;
+    color: #fff;
+    line-height: 1.2;
+  }
+  .cover-sub {
+    margin-top: 14px;
+    font-size: 13px;
+    color: #cbd5e1;
+    max-width: 80%;
     line-height: 1.6;
   }
-  .cover-count {
-    display: inline-block;
-    margin-top: 10px;
-    padding: 7px 16px;
-    border-radius: 999px;
-    background: #eef2ff;
-    color: #3730a3;
-    font-size: 12px;
-    font-weight: 800;
-    border: 1px solid #c7d2fe;
-  }
-  /* ── Observation pages ────────────────────────── */
-  .obs-page {
-    page-break-before: always;
-    break-before: page;
-  }
-  .obs-card {
-    border: 1px solid #e2e8f0;
+  .cover-meta {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.14);
     border-radius: 12px;
     overflow: hidden;
-    background: #fff;
+    margin-top: 8px;
   }
+  .cover-cell {
+    background: rgba(10,22,40,0.55);
+    padding: 13px 16px;
+    text-align: left;
+  }
+  .cover-cell .k {
+    font-size: 8.5px;
+    font-weight: 800;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .cover-cell .v {
+    font-size: 13px;
+    font-weight: 800;
+    color: #fff;
+    margin-top: 3px;
+  }
+  .cover-cell .v.mono { font-family: "Courier New", monospace; letter-spacing: 0.04em; }
+  .cover-badges { margin-top: 14px; display: flex; gap: 8px; justify-content: center; }
+  .cover-conf {
+    margin-top: 18px;
+    display: inline-block;
+    padding: 6px 16px;
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.2em;
+    color: #f0c040;
+    border: 1px solid rgba(240,192,64,0.5);
+    border-radius: 999px;
+  }
+
+  /* ── Executive summary (page 2) ───────────────── */
+  .summary-page { page-break-after: always; break-after: page; }
+  .exec-intro {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 16px 18px;
+    font-size: 12.5px;
+    line-height: 1.7;
+    color: #334155;
+    margin-bottom: 18px;
+  }
+  .exec-intro strong { color: #0f172a; }
+  .exec-tiles {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .exec-tile {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px 14px;
+    background: #fff;
+    border-top: 3px solid var(--c, #6366f1);
+  }
+  .exec-tile .tn { font-size: 22px; font-weight: 900; color: #0f172a; }
+  .exec-tile .tk {
+    font-size: 9px; font-weight: 800; color: #64748b;
+    text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px;
+  }
+  .bars { display: grid; gap: 10px; margin-bottom: 20px; }
+  .bar-row { display: grid; grid-template-columns: 86px 1fr 28px; align-items: center; gap: 10px; }
+  .bar-label { font-size: 11px; font-weight: 800; color: #334155; display: flex; align-items: center; gap: 6px; }
+  .bar-label .dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
+  .bar-track { height: 9px; background: #eef2f7; border-radius: 999px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 999px; }
+  .bar-count { font-size: 12px; font-weight: 900; color: #0f172a; text-align: right; }
+  .index-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .index-table thead th {
+    text-align: left; font-size: 9px; font-weight: 800; color: #64748b;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 8px 12px; background: #0f1c35; color: #fff;
+  }
+  .index-table thead th:last-child { text-align: right; }
+  .index-table td { padding: 8px 12px; border-bottom: 1px solid #eef2f7; }
+  .index-table tr:nth-child(even) td { background: #fafbfd; }
+  .index-table .t-no { font-weight: 900; color: #0f172a; font-family: "Courier New", monospace; }
+  .index-table .t-pg { text-align: right; font-weight: 800; color: #475569; }
+
+  /* ── Observation pages ────────────────────────── */
+  .obs-page { page-break-before: always; break-before: page; }
   .obs-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 10px;
-    padding: 12px 16px;
-    background: #0f1c35;
+    padding: 9px 14px;
+    background: linear-gradient(135deg, #0f1c35 0%, #1b2a4a 100%);
     color: #fff;
+    border-radius: 10px;
+    border-left: 4px solid #f0c040;
     page-break-after: avoid;
     break-after: avoid;
   }
-  .obs-no {
-    font-size: 13px;
-    font-weight: 900;
-    letter-spacing: 0.08em;
-  }
-  .obs-of { font-weight: 700; color: #cbd5e1; font-size: 11px; }
+  .obs-no { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; color: #cbd5e1; }
+  .obs-no .obs-num { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 0.04em; }
+  .obs-of { font-size: 11px; color: #94a3b8; }
   .obs-photos {
-    background: #f8fafc;
-    padding: 14px;
-    border-bottom: 1px solid #e2e8f0;
+    margin-top: 14px;
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 12px;
-    justify-items: center;
+    gap: 10px;
   }
-  .obs-photos.multi { grid-template-columns: repeat(2, 1fr); }
+  .obs-photos.one { grid-template-columns: 1fr; }
+  .obs-photos.two { grid-template-columns: repeat(2, 1fr); }
+  .obs-photos.grid { grid-template-columns: repeat(3, 1fr); }
   .photo {
     margin: 0;
-    width: 100%;
-    text-align: center;
     page-break-inside: avoid;
     break-inside: avoid;
-  }
-  .photo img {
-    max-width: 100%;
-    max-height: 150mm;
-    width: auto;
-    height: auto;
-    border-radius: 8px;
+    background: #f1f5f9;
     border: 1px solid #e2e8f0;
-    object-fit: contain;
-    background: #fff;
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
-  .obs-photos.multi .photo img { max-height: 95mm; }
-  .obs-body { padding: 16px; }
-  .block {
+  .obs-photos.two .photo, .obs-photos.grid .photo { aspect-ratio: 4 / 3; }
+  .photo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .obs-photos.one .photo { aspect-ratio: auto; }
+  .obs-photos.one .photo img { max-height: 148mm; width: auto; max-width: 100%; height: auto; }
+  .obs-body { margin-top: 16px; }
+  .block { page-break-inside: avoid; break-inside: avoid; }
+  .lbl {
+    font-size: 9px; font-weight: 800; color: #64748b;
+    text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 6px 0;
+  }
+  .val {
+    font-size: 12.5px; color: #1e293b; line-height: 1.75;
+    white-space: pre-wrap;
+    background: #fafbfd; border: 1px solid #eef2f7;
+    border-radius: 8px; padding: 13px 15px;
+  }
+  .rec {
+    margin-top: 16px;
+    background: #eef2ff;
+    border: 1px solid #c7d2fe;
+    border-left: 4px solid #4f46e5;
+    border-radius: 10px;
+    padding: 13px 15px;
     page-break-inside: avoid;
     break-inside: avoid;
   }
-  .block + .block { margin-top: 14px; }
-  .lbl {
-    font-size: 9px;
-    font-weight: 800;
-    color: #64748b;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin: 0 0 5px 0;
+  .rec-head {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 10px; font-weight: 900; color: #3730a3;
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 7px;
   }
-  .lbl-accent { color: #4338ca; }
-  .val {
-    font-size: 12.5px;
-    color: #0f172a;
-    line-height: 1.6;
-    white-space: pre-wrap;
+  .rec-icon { font-size: 13px; }
+  .rec-body { font-size: 12.5px; color: #1e293b; line-height: 1.7; white-space: pre-wrap; }
+
+  /* ── End-of-report page ───────────────────────── */
+  .end-page {
+    page-break-before: always;
+    break-before: page;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 16px;
   }
-  .val-accent {
-    background: #eef2ff;
-    padding: 10px 12px;
-    border-radius: 6px;
-    border-left: 3px solid #4338ca;
+  .end-rule { width: 56px; height: 2px; background: #f0c040; }
+  .end-title { font-size: 22px; font-weight: 900; letter-spacing: 0.22em; color: #0f1c35; }
+  .end-logo img { height: 40px; width: auto; }
+  .end-meta { font-size: 12px; color: #475569; line-height: 1.9; }
+  .end-meta strong { color: #0f172a; }
+  .end-conf {
+    margin-top: 6px;
+    display: inline-block;
+    padding: 6px 16px;
+    font-size: 9.5px; font-weight: 800; letter-spacing: 0.2em;
+    color: #92400e; background: #fef3c7; border: 1px solid #fcd34d;
+    border-radius: 999px;
   }
-  /* ── Repeating page footer (sits inside reserved bottom margin) ── */
+
+  /* ── Clean repeating footer (no heavy rule, never overlaps) ── */
   .page-footer {
     position: fixed;
-    bottom: 8mm;
+    bottom: 9mm;
     left: 14mm;
     right: 14mm;
-    border-top: 1.5px solid #1e293b;
-    padding-top: 6px;
     display: flex;
     justify-content: space-between;
+    align-items: center;
     gap: 10px;
-    font-size: 9.5px;
-    color: #475569;
+    font-size: 8.5px;
+    color: #94a3b8;
+    letter-spacing: 0.02em;
   }
+  .page-footer .fdot { color: #f0c040; font-weight: 900; }
   .print-bar {
     position: sticky;
     top: 0;
@@ -2472,7 +2607,11 @@ function printReport(report: Report) {
     body { background: #fff; }
     .doc { max-width: none; padding: 0; }
     .print-bar { display: none !important; }
-    .cover { min-height: calc(297mm - 16mm - 22mm); }
+    .cover, .end-page { min-height: calc(297mm - 16mm - 22mm); }
+  }
+  @media screen {
+    .cover, .summary-page { margin-bottom: 22px; }
+    .end-page { margin-top: 22px; padding: 40px 0; }
   }
 </style>
 </head>
@@ -2483,41 +2622,80 @@ function printReport(report: Report) {
   </div>
 
   <div class="page-footer">
-    <div>Generated by ${escHtml(report.createdByName)} • ${escHtml(formatDateTime(report.createdAt) || "—")}</div>
-    <div>Emirates International Holding Group © ${year}</div>
+    <div>${escHtml(report.reportNumber)} <span class="fdot">•</span> Field Visit Report</div>
+    <div>EIHG <span class="fdot">•</span> Confidential <span class="fdot">•</span> © ${year}</div>
   </div>
 
   <div class="doc">
-    <!-- ── Cover page ── -->
+    <!-- ── Page 1 · Cover ── -->
     <div class="cover">
-      <div class="letterhead">
-        <div class="official-tag">✦ OFFICIAL DOCUMENT ✦</div>
-        <div class="brand-1">EMIRATES INTERNATIONAL HOLDING GROUP</div>
-        <div class="brand-2">Philippine Supermarket</div>
-        <div class="doc-title">FIELD VISIT REPORT</div>
+      <div>
+        <div class="cover-logo"><img src="${logoUrl}" alt="EIHG" /></div>
+        <div class="cover-tag">✦ OFFICIAL FIELD VISIT REPORT ✦</div>
+        <div class="cover-brand-1">EMIRATES INTERNATIONAL HOLDING GROUP</div>
+        <div class="cover-brand-2">Philippine Supermarket</div>
       </div>
 
-      <div class="info">
-        <div><div class="k">Report No.</div><div class="v mono">${escHtml(report.reportNumber)}</div></div>
-        <div><div class="k">Branch</div><div class="v">${escHtml(report.branchName)}</div></div>
-        <div><div class="k">Date of Visit</div><div class="v">${escHtml(report.visitDate)}</div></div>
-        <div><div class="k">Prepared By</div><div class="v">${escHtml(report.preparedBy)}</div></div>
-        <div><div class="k">Status</div><div class="v"><span class="pill" style="background:${overallS.bg};color:${overallS.fg};border-color:${overallS.bd}">${escHtml(report.status)}</span></div></div>
-        <div><div class="k">Overall Priority</div><div class="v"><span class="pill" style="background:${overallP.bg};color:${overallP.fg};border-color:${overallP.bd}">${escHtml(report.priority)}</span></div></div>
-        <div class="wide"><div class="k">Title</div><div class="v">${escHtml(report.title)}</div></div>
+      <div class="cover-hero">
+        <div class="cover-rule"></div>
+        <div class="cover-title">FIELD VISIT REPORT</div>
+        ${report.title ? `<div class="cover-sub">${escHtml(report.title)}</div>` : ""}
       </div>
 
-      <div class="cover-spacer"></div>
-
-      <div class="cover-note">
-        This document contains confidential field-visit findings and recommended corrective actions.
-        <br />
-        <span class="cover-count">${total} Observation${total === 1 ? "" : "s"} Recorded</span>
+      <div>
+        <div class="cover-meta">
+          <div class="cover-cell"><div class="k">Report No.</div><div class="v mono">${escHtml(report.reportNumber)}</div></div>
+          <div class="cover-cell"><div class="k">Branch</div><div class="v">${escHtml(report.branchName)}</div></div>
+          <div class="cover-cell"><div class="k">Date of Visit</div><div class="v">${escHtml(report.visitDate)}</div></div>
+          <div class="cover-cell"><div class="k">Prepared By</div><div class="v">${escHtml(report.preparedBy)}</div></div>
+        </div>
+        <div class="cover-badges">
+          <span class="pill" style="background:${overallS.bg};color:${overallS.fg};border-color:${overallS.bd}">${escHtml(report.status)}</span>
+          <span class="pill" style="background:${overallP.bg};color:${overallP.fg};border-color:${overallP.bd}">${escHtml(report.priority)} Priority</span>
+        </div>
+        <div class="cover-conf">CONFIDENTIAL · INTERNAL USE</div>
       </div>
     </div>
 
+    <!-- ── Page 2 · Executive Summary ── -->
+    <div class="summary-page">
+      <div class="section-title">Executive Summary</div>
+      <div class="exec-intro">
+        This report documents <strong>${total} observation${total === 1 ? "" : "s"}</strong> recorded during a field visit to <strong>${escHtml(report.branchName)}</strong> on <strong>${escHtml(report.visitDate)}</strong>, prepared by <strong>${escHtml(report.preparedBy)}</strong>. Each observation is detailed on its own page with supporting photographs and a recommended corrective action.
+      </div>
+
+      <div class="exec-tiles">
+        <div class="exec-tile" style="--c:#dc2626"><div class="tn">${counts.Critical}</div><div class="tk">Critical</div></div>
+        <div class="exec-tile" style="--c:#ea580c"><div class="tn">${counts.High}</div><div class="tk">High</div></div>
+        <div class="exec-tile" style="--c:#d97706"><div class="tn">${counts.Medium}</div><div class="tk">Medium</div></div>
+        <div class="exec-tile" style="--c:#16a34a"><div class="tn">${counts.Low}</div><div class="tk">Low</div></div>
+      </div>
+
+      <div class="section-title">Priority Distribution</div>
+      <div class="bars">${priorityBars}</div>
+
+      <div class="section-title">Observation Index</div>
+      <table class="index-table">
+        <thead><tr><th>Observation</th><th>Priority</th><th>Page</th></tr></thead>
+        <tbody>${summaryRows || '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">No observations recorded.</td></tr>'}</tbody>
+      </table>
+    </div>
+
     <!-- ── Observation pages ── -->
-    ${observationsHtml || '<div style="padding:14px;background:#f8fafc;border-radius:8px;color:#64748b;font-size:12px;text-align:center;">No observations recorded.</div>'}
+    ${observationsHtml}
+
+    <!-- ── Final page ── -->
+    <div class="end-page">
+      <div class="end-rule"></div>
+      <div class="end-title">END OF REPORT</div>
+      <div class="end-logo"><img src="${logoUrl}" alt="EIHG" /></div>
+      <div class="end-meta">
+        Prepared By <strong>${escHtml(report.preparedBy)}</strong><br />
+        Generated <strong>${escHtml(generatedAt)}</strong><br />
+        Emirates International Holding Group © ${year}
+      </div>
+      <div class="end-conf">CONFIDENTIAL · INTERNAL USE</div>
+    </div>
   </div>
   <script>
     function closeReport() {
@@ -2528,8 +2706,26 @@ function printReport(report: Report) {
         if (!window.closed && history.length > 1) history.back();
       }, 120);
     }
+    // Wait until every image has actually loaded before printing — this is
+    // what was causing some photos to be blank in the PDF on mobile (print
+    // fired before slow Firebase image URLs finished downloading).
+    function waitForImages() {
+      var imgs = Array.prototype.slice.call(document.images);
+      return Promise.all(
+        imgs.map(function (img) {
+          if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+          return new Promise(function (res) {
+            img.addEventListener('load', res, { once: true });
+            img.addEventListener('error', res, { once: true });
+          });
+        })
+      );
+    }
     window.addEventListener('load', function () {
-      setTimeout(function () { window.print(); }, 350);
+      var safety = new Promise(function (r) { setTimeout(r, 10000); });
+      Promise.race([waitForImages(), safety]).then(function () {
+        setTimeout(function () { window.print(); }, 200);
+      });
     });
   </script>
 </body>

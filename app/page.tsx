@@ -2330,10 +2330,26 @@ export default function HomePage() {
           .filter((im) => im.file)
           .map(async (im) => {
             const compressed = await compressImage(im.file as File);
-            const res = await uploadReportImage(reportId, compressed);
-            uploaded.set(im.id, res);
-            done += 1;
-            onProgress?.(done, total);
+            // Retry transient upload failures (common on mobile networks) so a
+            // report is never saved with a missing photo. If every attempt
+            // fails, the error propagates and the whole save is aborted —
+            // nothing partial is written and the user's draft is preserved.
+            let lastErr: unknown;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                const res = await uploadReportImage(reportId, compressed);
+                uploaded.set(im.id, res);
+                done += 1;
+                onProgress?.(done, total);
+                return;
+              } catch (e) {
+                lastErr = e;
+                await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+              }
+            }
+            throw lastErr instanceof Error
+              ? lastErr
+              : new Error("Image upload failed after multiple attempts.");
           })
       )
     );
