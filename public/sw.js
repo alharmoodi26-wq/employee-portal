@@ -1,4 +1,4 @@
-const CACHE = "eihg-portal-v1";
+const CACHE = "eihg-portal-v2";
 
 const PRECACHE = ["/", "/eihg-logo.jpeg"];
 
@@ -39,6 +39,36 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const isHtml =
+    request.mode === "navigate" ||
+    request.headers.get("Accept")?.includes("text/html");
+
+  // Pages/HTML: network-first so a fresh deploy shows up immediately.
+  // Falls back to cache only when offline.
+  if (isHtml) {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(request, clone));
+          }
+          return response;
+        })
+        .catch(
+          () =>
+            caches.match(request).then(
+              (cached) =>
+                cached ??
+                caches.match("/") ??
+                new Response("Offline", { status: 503 })
+            )
+        )
+    );
+    return;
+  }
+
+  // Other same-origin assets (logo, icons): cache-first, refresh in background.
   event.respondWith(
     caches.match(request).then((cached) => {
       const networkFetch = fetch(request)
@@ -49,13 +79,7 @@ self.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(() => {
-          // Offline: serve cached HTML page as fallback
-          if (request.headers.get("Accept")?.includes("text/html")) {
-            return caches.match("/") ?? new Response("Offline", { status: 503 });
-          }
-          return new Response("Offline", { status: 503 });
-        });
+        .catch(() => new Response("Offline", { status: 503 }));
 
       return cached ?? networkFetch;
     })

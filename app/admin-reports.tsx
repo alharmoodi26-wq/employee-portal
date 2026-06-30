@@ -2329,14 +2329,46 @@ function printReport(report: Report) {
     font-size: 10px;
     color: #475569;
   }
+  .print-bar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    gap: 10px;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: #0f1c35;
+    color: #fff;
+    margin: -14mm -14mm 16px -14mm;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-top: max(12px, env(safe-area-inset-top));
+  }
+  .print-bar button {
+    border: none;
+    border-radius: 10px;
+    padding: 10px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .print-bar .pb-back { background: rgba(255,255,255,0.15); color: #fff; }
+  .print-bar .pb-print { background: #f0c040; color: #0f1c35; }
   @media print {
     body { background: #fff; }
     .doc { max-width: none; padding: 0; }
+    .print-bar { display: none !important; }
   }
 </style>
 </head>
 <body>
   <div class="doc">
+    <div class="print-bar">
+      <button type="button" class="pb-back" onclick="closeReport()">← Back</button>
+      <button type="button" class="pb-print" onclick="window.print()">🖨 Print / Save PDF</button>
+    </div>
     <div class="letterhead">
       <div class="official-tag">✦ OFFICIAL DOCUMENT ✦</div>
       <div class="brand-1">EMIRATES INTERNATIONAL HOLDING GROUP</div>
@@ -2363,8 +2395,16 @@ function printReport(report: Report) {
     </div>
   </div>
   <script>
+    function closeReport() {
+      window.close();
+      // Some mobile browsers block window.close() for script-opened tabs;
+      // fall back to navigating back within this tab's history.
+      setTimeout(function () {
+        if (!window.closed && history.length > 1) history.back();
+      }, 120);
+    }
     window.addEventListener('load', function () {
-      setTimeout(function () { window.print(); }, 250);
+      setTimeout(function () { window.print(); }, 350);
     });
   </script>
 </body>
