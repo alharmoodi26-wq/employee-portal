@@ -186,20 +186,35 @@ function formatBirthday(iso: string): string {
   return `${months[m]} ${d}`;
 }
 
+// Cross-origin images (e.g. Firebase Storage) are routed through our
+// same-origin proxy so the canvas isn't tainted and exports work. Same-origin
+// URLs and data URLs are used as-is.
+function toLoadableSrc(src: string): string {
+  if (!src || src.startsWith("data:")) return src;
+  try {
+    const u = new URL(src, window.location.origin);
+    if (u.origin === window.location.origin) return src;
+    return `/api/image-proxy?url=${encodeURIComponent(src)}`;
+  } catch {
+    return src;
+  }
+}
+
 function loadImage(src: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     if (!src) return resolve(null);
-    // First try with CORS so the drawn image can be exported (toDataURL/toBlob).
-    // If that fails (bucket without CORS headers), retry without CORS so the
-    // photo still shows in the preview — export then falls back gracefully.
-    const attempt = (useCors: boolean) => {
+    const primary = toLoadableSrc(src);
+    // 1) Proxied same-origin load with CORS → clean canvas, fully exportable.
+    // 2) If that fails, fall back to the original URL without CORS so the photo
+    //    still appears in the preview (export then degrades gracefully).
+    const attempt = (url: string, useCors: boolean, onFail: () => void) => {
       const img = new Image();
       if (useCors) img.crossOrigin = "anonymous";
       img.onload = () => resolve(img);
-      img.onerror = () => (useCors ? attempt(false) : resolve(null));
-      img.src = src;
+      img.onerror = onFail;
+      img.src = url;
     };
-    attempt(true);
+    attempt(primary, true, () => attempt(src, false, () => resolve(null)));
   });
 }
 
