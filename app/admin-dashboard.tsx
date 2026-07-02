@@ -3913,13 +3913,25 @@ export default function AdminDashboard({
                                 <button
                                   title="Create greeting card"
                                   style={{ ...invoiceIconBtn(theme), color: "#ec4899" }}
-                                  onClick={() =>
+                                  onClick={() => {
+                                    // Pull the employee's photo from the same
+                                    // source the Employees pages use
+                                    // (profilePhotoUrl), matched by name. Fall
+                                    // back to the birthday entry's own photo.
+                                    const emp = employees.find(
+                                      (e) =>
+                                        e.name.trim().toLowerCase() ===
+                                        item.name.trim().toLowerCase()
+                                    );
                                     setCardPerson({
                                       name: item.name,
                                       birthday: item.birthday,
-                                      photoUrl: item.photoLink || undefined,
-                                    })
-                                  }
+                                      photoUrl:
+                                        item.photoLink ||
+                                        emp?.profilePhotoUrl ||
+                                        undefined,
+                                    });
+                                  }}
                                 >🎉</button>
                                 {item.photoLink && (
                                   <button title="View Photo" style={invoiceIconBtn(theme)} onClick={() => setBirthdayPreview({ title: `${item.name} — Birthday Photo`, image: item.photoLink! })}>🖼</button>

@@ -189,11 +189,17 @@ function formatBirthday(iso: string): string {
 function loadImage(src: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     if (!src) return resolve(null);
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = src;
+    // First try with CORS so the drawn image can be exported (toDataURL/toBlob).
+    // If that fails (bucket without CORS headers), retry without CORS so the
+    // photo still shows in the preview — export then falls back gracefully.
+    const attempt = (useCors: boolean) => {
+      const img = new Image();
+      if (useCors) img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => (useCors ? attempt(false) : resolve(null));
+      img.src = src;
+    };
+    attempt(true);
   });
 }
 
@@ -642,19 +648,38 @@ export function BirthdayCardModal({
 
   const safeName = person.name.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "");
 
+  // Shown when a cross-origin photo taints the canvas (loaded without CORS):
+  // the preview still displays the photo, but the pixels can't be read back.
+  const TAINT_MSG =
+    "The photo can't be exported due to cross-origin restrictions. It shows in the preview, but downloading or emailing requires the image host to allow CORS.";
+
+  const getDataUrl = (): string => {
+    const canvas = canvasRef.current;
+    if (!canvas) return "";
+    try {
+      return canvas.toDataURL("image/png", 0.95);
+    } catch {
+      return ""; // tainted canvas
+    }
+  };
+
   const toBlob = useCallback(
     () =>
       new Promise<Blob | null>((resolve) => {
         const canvas = canvasRef.current;
         if (!canvas) return resolve(null);
-        canvas.toBlob((b) => resolve(b), "image/png", 0.95);
+        try {
+          canvas.toBlob((b) => resolve(b), "image/png", 0.95);
+        } catch {
+          resolve(null); // tainted canvas
+        }
       }),
     []
   );
 
   const downloadPng = async () => {
     const blob = await toBlob();
-    if (!blob) return showToast("error", "Could not render the card.");
+    if (!blob) return showToast("error", TAINT_MSG);
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -667,7 +692,8 @@ export function BirthdayCardModal({
   const downloadPdf = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const dataUrl = canvas.toDataURL("image/png", 0.95);
+    const dataUrl = getDataUrl();
+    if (!dataUrl) return showToast("error", TAINT_MSG);
     const w = window.open("", "_blank", "width=1100,height=800");
     if (!w) return showToast("error", "Please allow popups to save the PDF.");
     w.document.open();
@@ -720,10 +746,10 @@ export function BirthdayCardModal({
     if (!recipient.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient.trim())) {
       return showToast("error", "Enter a valid recipient email.");
     }
+    const dataUrl = getDataUrl();
+    if (!dataUrl) return showToast("error", TAINT_MSG);
     setBusy("email");
     try {
-      const canvas = canvasRef.current;
-      const dataUrl = canvas?.toDataURL("image/png", 0.95) || "";
       const base64 = dataUrl.split(",")[1] || "";
       const res = await fetch("/api/birthday-card/send", {
         method: "POST",
