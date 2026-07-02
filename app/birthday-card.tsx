@@ -509,6 +509,63 @@ function renderTemplate(
   else drawEIHG(ctx, env);
 }
 
+// ── Reusable UI pieces (theme-aware, layout via Tailwind) ────────────────
+type Palette = ReturnType<typeof getThemePalette>;
+
+function Section({
+  label,
+  hint,
+  theme,
+  children,
+}: {
+  label: string;
+  hint?: React.ReactNode;
+  theme: Palette;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-2.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3
+          className="text-[13px] font-bold"
+          style={{ color: theme.title }}
+        >
+          {label}
+        </h3>
+        {hint ? <span className="text-[11px]">{hint}</span> : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function ActionTile({
+  onClick,
+  icon,
+  label,
+  theme,
+}: {
+  onClick: () => void;
+  icon: string;
+  label: string;
+  theme: Palette;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-center justify-center gap-1 rounded-xl py-2.5 px-2 text-[12px] font-semibold transition-colors"
+      style={{
+        border: `1px solid ${theme.cardBorder}`,
+        background: theme.inputBg,
+        color: theme.title,
+      }}
+    >
+      <span className="text-[17px] leading-none">{icon}</span>
+      {label}
+    </button>
+  );
+}
+
 // ── Preview + actions modal ──────────────────────────────────────────────
 export function BirthdayCardModal({
   person,
@@ -691,200 +748,195 @@ export function BirthdayCardModal({
     }
   };
 
-  const actionBtn = (extra?: React.CSSProperties): React.CSSProperties => ({
-    ...buttonStyle(false),
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    ...extra,
-  });
-
   return (
     <div
       onClick={onClose}
+      className="fixed inset-0 z-[3000] flex items-center justify-center p-3 sm:p-5"
       style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 3000,
-        background: "rgba(8,12,22,0.66)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom))",
-        overflowY: "auto",
+        background: "rgba(8,12,22,0.72)",
+        backdropFilter: "blur(3px)",
+        paddingTop: "max(12px, env(safe-area-inset-top))",
+        paddingBottom: "max(12px, env(safe-area-inset-bottom))",
       }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="relative grid w-full max-w-7xl grid-cols-1 overflow-y-auto rounded-2xl lg:h-[94vh] lg:grid-cols-[minmax(0,1.55fr)_minmax(380px,1fr)] lg:overflow-hidden"
         style={{
-          ...cardStyle(),
-          width: "min(920px, 100%)",
-          maxHeight: "92vh",
-          overflowY: "auto",
-          padding: 20,
-          display: "grid",
-          gap: 16,
+          maxHeight: "94vh",
+          background: theme.cardBackground,
+          border: `1px solid ${theme.cardBorder}`,
+          boxShadow: "0 40px 90px rgba(2,6,23,0.55)",
         }}
       >
-        <div
+        {/* Floating close */}
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full text-[15px] font-bold transition-colors"
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
+            background: "rgba(15,23,42,0.55)",
+            color: "#fff",
+            backdropFilter: "blur(4px)",
           }}
         >
-          <div style={{ fontWeight: 900, fontSize: 17, color: theme.title }}>
-            🎉 Birthday Card — {person.name}
-          </div>
-          <button onClick={onClose} style={{ ...smallButtonStyle() }}>
-            ✕
-          </button>
-        </div>
+          ✕
+        </button>
 
-        {/* Preview */}
+        {/* ── LEFT · Preview (always visible, never overlapped) ── */}
         <div
+          className="flex items-center justify-center p-6 sm:p-8 lg:p-10"
           style={{
-            borderRadius: 14,
-            overflow: "hidden",
-            border: `1px solid ${theme.cardBorder}`,
-            background: "#0b1220",
-            aspectRatio: `${CARD_W} / ${CARD_H}`,
+            background:
+              "radial-gradient(120% 120% at 50% 0%, #16213c 0%, #0b1220 70%)",
           }}
         >
-          <canvas
-            ref={canvasRef}
-            width={CARD_W}
-            height={CARD_H}
-            style={{ width: "100%", height: "100%", display: "block" }}
-          />
-        </div>
-
-        {/* Template picker */}
-        <div style={{ display: "grid", gap: 8 }}>
-          <span
-            style={{ fontSize: 12, fontWeight: 700, color: theme.subtleText }}
-          >
-            Template (all landscape)
-          </span>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: 8,
-            }}
-            className="birthday-card-templates"
-          >
-            {TEMPLATES.map((t) => {
-              const active = t.id === template;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setTemplate(t.id)}
-                  style={{
-                    ...smallButtonStyle(),
-                    padding: "9px 8px",
-                    display: "grid",
-                    gap: 2,
-                    borderColor: active ? "#6366f1" : theme.cardBorder,
-                    color: active ? "#6366f1" : theme.title,
-                    background: active ? "rgba(99,102,241,0.08)" : undefined,
-                    fontWeight: active ? 800 : 600,
-                  }}
-                >
-                  <span style={{ fontSize: 12 }}>{t.name}</span>
-                  <span style={{ fontSize: 10, color: theme.subtleText }}>
-                    {t.hint}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Editable message */}
-        <div style={{ display: "grid", gap: 6 }}>
-          <span
-            style={{ fontSize: 12, fontWeight: 700, color: theme.subtleText }}
-          >
-            Greeting message
-          </span>
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            rows={3}
-            style={{
-              ...inputStyle(),
-              resize: "vertical",
-              fontFamily: "inherit",
-              lineHeight: 1.5,
-            }}
-          />
-        </div>
-
-        {/* Recipient + send */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr auto",
-            gap: 8,
-            alignItems: "end",
-          }}
-          className="birthday-card-send"
-        >
-          <div style={{ display: "grid", gap: 6 }}>
-            <span
-              style={{ fontSize: 12, fontWeight: 700, color: theme.subtleText }}
+          <div className="w-full max-w-[860px]">
+            <div
+              className="overflow-hidden rounded-xl"
+              style={{
+                aspectRatio: `${CARD_W} / ${CARD_H}`,
+                boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                background: "#0b1220",
+              }}
             >
-              Recipient email{" "}
-              {matchedEmail ? (
-                <span style={{ color: "#16a34a" }}>· auto-filled</span>
-              ) : (
-                <span style={{ color: theme.subtleText }}>
-                  · no directory match, enter manually
-                </span>
-              )}
-            </span>
-            <input
-              value={recipient}
-              onChange={(e) => setRecipient(e.target.value)}
-              placeholder="name@company.com"
-              style={inputStyle()}
-            />
+              <canvas
+                ref={canvasRef}
+                width={CARD_W}
+                height={CARD_H}
+                className="block h-full w-full"
+              />
+            </div>
+            <p className="mt-3 text-center text-[11px] font-medium tracking-wide text-slate-400">
+              Live preview · A4 landscape · {person.name}
+            </p>
           </div>
-          <button
-            onClick={sendEmail}
-            disabled={busy === "email"}
-            style={{
-              ...buttonStyle(true),
-              background: "linear-gradient(135deg,#6366f1,#4f46e5)",
-              color: "#fff",
-              opacity: busy === "email" ? 0.7 : 1,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {busy === "email" ? "Sending…" : "✉ Send Email"}
-          </button>
         </div>
 
-        {/* Download / share */}
+        {/* ── RIGHT · Controls (internal scroll only) ── */}
         <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 8,
-          }}
-          className="birthday-card-actions"
+          className="flex min-h-0 flex-col"
+          style={{ borderLeft: `1px solid ${theme.cardBorder}` }}
         >
-          <button onClick={downloadPng} style={actionBtn()}>
-            ⬇ PNG
-          </button>
-          <button onClick={downloadPdf} style={actionBtn()}>
-            📄 PDF
-          </button>
-          <button onClick={shareCard} style={actionBtn()}>
-            🔗 Share
-          </button>
+          {/* Header */}
+          <div
+            className="flex shrink-0 items-start gap-3 px-6 py-4 sm:px-7"
+            style={{ borderBottom: `1px solid ${theme.cardBorder}` }}
+          >
+            <div className="min-w-0">
+              <h2
+                className="truncate text-[17px] font-extrabold leading-tight"
+                style={{ color: theme.title }}
+              >
+                🎉 Birthday Card
+              </h2>
+              <p
+                className="mt-0.5 text-[12px]"
+                style={{ color: theme.subtleText }}
+              >
+                Personalize, download, or send the card
+              </p>
+            </div>
+          </div>
+
+          {/* Scrollable settings */}
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5 sm:px-7">
+            <Section label="Template" theme={theme}>
+              <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-2">
+                {TEMPLATES.map((t) => {
+                  const active = t.id === template;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => setTemplate(t.id)}
+                      className="flex flex-col gap-0.5 rounded-xl px-3 py-2.5 text-left transition-colors"
+                      style={{
+                        border: `1.5px solid ${active ? "#6366f1" : theme.cardBorder}`,
+                        background: active
+                          ? "rgba(99,102,241,0.10)"
+                          : theme.inputBg,
+                        color: active ? "#6366f1" : theme.title,
+                      }}
+                    >
+                      <span className="text-[13px] font-bold">{t.name}</span>
+                      <span
+                        className="text-[11px]"
+                        style={{ color: active ? "#6366f1" : theme.subtleText }}
+                      >
+                        {t.hint}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </Section>
+
+            <Section label="Greeting message" theme={theme}>
+              <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                rows={4}
+                className="w-full"
+                style={{
+                  ...inputStyle(),
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                  lineHeight: 1.55,
+                }}
+              />
+            </Section>
+
+            <Section
+              label="Recipient email"
+              theme={theme}
+              hint={
+                matchedEmail ? (
+                  <span style={{ color: "#16a34a", fontWeight: 700 }}>
+                    ✓ auto-filled
+                  </span>
+                ) : (
+                  <span style={{ color: theme.subtleText }}>enter manually</span>
+                )
+              }
+            >
+              <input
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                placeholder="name@company.com"
+                type="email"
+                className="w-full"
+                style={inputStyle()}
+              />
+            </Section>
+          </div>
+
+          {/* Sticky footer actions */}
+          <div
+            className="shrink-0 space-y-2.5 px-6 py-4 sm:px-7"
+            style={{
+              borderTop: `1px solid ${theme.cardBorder}`,
+              background: theme.softCardBackground,
+            }}
+          >
+            <button
+              onClick={sendEmail}
+              disabled={busy === "email"}
+              className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-[14px] font-bold text-white transition-opacity"
+              style={{
+                background: "linear-gradient(135deg,#6366f1,#4f46e5)",
+                boxShadow: "0 10px 22px rgba(99,102,241,0.32)",
+                opacity: busy === "email" ? 0.7 : 1,
+              }}
+            >
+              {busy === "email" ? "Sending…" : "✉  Send by Email"}
+            </button>
+            <div className="grid grid-cols-3 gap-2.5">
+              <ActionTile onClick={downloadPng} icon="⬇" label="PNG" theme={theme} />
+              <ActionTile onClick={downloadPdf} icon="📄" label="PDF" theme={theme} />
+              <ActionTile onClick={shareCard} icon="🔗" label="Share" theme={theme} />
+            </div>
+          </div>
         </div>
       </div>
     </div>
