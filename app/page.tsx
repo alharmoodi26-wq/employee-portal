@@ -32,6 +32,10 @@ import AdminDashboard from "./admin-dashboard";
 import { AssessmentDraft } from "./admin-assessments";
 import { ReportDraft, SaveProgress } from "./admin-reports";
 import {
+  BirthdayCardSettings,
+  DEFAULT_BIRTHDAY_CARD_SETTINGS,
+} from "./birthday-card";
+import {
   Assessment,
   AssessmentBranch,
   AssessmentSubmission,
@@ -549,6 +553,8 @@ export default function HomePage() {
   const [assignedTasks, setAssignedTasks] = useState<AssignedTask[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [birthdays, setBirthdays] = useState<BirthdayEntry[]>([]);
+  const [birthdayCardSettings, setBirthdayCardSettings] =
+    useState<BirthdayCardSettings>(DEFAULT_BIRTHDAY_CARD_SETTINGS);
   const [ohcCertifications, setOhcCertifications] = useState<OHCCertificationEntry[]>([]);
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
@@ -947,6 +953,29 @@ export default function HomePage() {
       }
     );
 
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Birthday-card settings (single config document — not employee data).
+  useEffect(() => {
+    if (!currentUser) {
+      setBirthdayCardSettings(DEFAULT_BIRTHDAY_CARD_SETTINGS);
+      return;
+    }
+    const unsubscribe = onSnapshot(
+      doc(db, "config", "birthdayCard"),
+      (snap) => {
+        if (snap.exists()) {
+          setBirthdayCardSettings({
+            ...DEFAULT_BIRTHDAY_CARD_SETTINGS,
+            ...(snap.data() as Partial<BirthdayCardSettings>),
+          });
+        } else {
+          setBirthdayCardSettings(DEFAULT_BIRTHDAY_CARD_SETTINGS);
+        }
+      },
+      (error) => console.error("Error loading birthday-card settings:", error)
+    );
     return () => unsubscribe();
   }, [currentUser]);
 
@@ -1975,6 +2004,14 @@ export default function HomePage() {
     });
   };
 
+  const saveBirthdayCardSettings = async (settings: BirthdayCardSettings) => {
+    await setDoc(
+      doc(db, "config", "birthdayCard"),
+      { ...settings, updatedAt: serverTimestamp() },
+      { merge: true }
+    );
+  };
+
   const deleteBirthday = async (birthdayId: string, birthdayName: string) => {
     setConfirmState({
       open: true,
@@ -2612,6 +2649,8 @@ export default function HomePage() {
           assignedTasks={assignedTasks}
           attendance={attendance}
           birthdays={birthdays}
+          birthdayCardSettings={birthdayCardSettings}
+          onSaveBirthdayCardSettings={saveBirthdayCardSettings}
           ohcCertifications={ohcCertifications}
           invoices={invoices}
           worksHasMore={worksHasMore}

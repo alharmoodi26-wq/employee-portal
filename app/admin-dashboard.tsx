@@ -46,6 +46,12 @@ import {
 } from "./portal-utils";
 import AdminAssessments, { AssessmentDraft } from "./admin-assessments";
 import AdminReports, { ReportDraft } from "./admin-reports";
+import {
+  BirthdayCardModal,
+  BirthdayCardSettingsModal,
+  BirthdayCardSettings,
+  BirthdayPerson,
+} from "./birthday-card";
 
 type DashboardTab = "dashboard" | "review" | "employees" | "hr" | "invoices" | "assessments" | "reports";
 type HRSubTab = "attendance" | "ohc" | "birthdays";
@@ -128,6 +134,8 @@ type AdminDashboardProps = {
   assignedTasks: AssignedTask[];
   attendance: AttendanceRecord[];
   birthdays: BirthdayEntry[];
+  birthdayCardSettings: BirthdayCardSettings;
+  onSaveBirthdayCardSettings: (settings: BirthdayCardSettings) => Promise<void>;
   ohcCertifications?: OHCCertificationEntry[];
   invoices: InvoiceItem[];
   worksHasMore?: boolean;
@@ -828,6 +836,8 @@ export default function AdminDashboard({
   assignedTasks,
   attendance,
   birthdays,
+  birthdayCardSettings,
+  onSaveBirthdayCardSettings,
   ohcCertifications = [],
   invoices,
   worksHasMore = false,
@@ -931,6 +941,8 @@ export default function AdminDashboard({
 
   const [showBirthdayMenu, setShowBirthdayMenu] = useState(false);
   const [showBirthdayModal, setShowBirthdayModal] = useState(false);
+  const [cardPerson, setCardPerson] = useState<BirthdayPerson | null>(null);
+  const [showCardSettings, setShowCardSettings] = useState(false);
   const [showManageBirthdaysModal, setShowManageBirthdaysModal] = useState(false);
   const [birthdaySaving, setBirthdaySaving] = useState(false);
   const [birthdayPhoto, setBirthdayPhoto] = useState<File | null>(null);
@@ -3843,6 +3855,7 @@ export default function AdminDashboard({
                       <div style={{ fontWeight: 800, fontSize: 15, color: theme.title }}>🎂 Birthdays</div>
                       <span style={{ fontSize: 12, color: theme.subtleText }}>{sortedBirthdays.length} records</span>
                       <div style={{ flex: 1 }} />
+                      <button className="birthday-print-btn" style={buttonStyle(false)} onClick={() => setShowCardSettings(true)} title="Birthday card settings">⚙ Card Settings</button>
                       <button className="birthday-print-btn" style={buttonStyle(false)} onClick={handlePrintBirthdayReport}>🖨 Print Report</button>
                       <button className="birthday-add-btn" style={buttonStyle(true)} onClick={() => setShowBirthdayModal(true)}>+ Add Birthday</button>
                     </div>
@@ -3897,6 +3910,17 @@ export default function AdminDashboard({
                                 {pillText}
                               </span>
                               <div style={{ display: "flex", gap: 5 }}>
+                                <button
+                                  title="Create greeting card"
+                                  style={{ ...invoiceIconBtn(theme), color: "#ec4899" }}
+                                  onClick={() =>
+                                    setCardPerson({
+                                      name: item.name,
+                                      birthday: item.birthday,
+                                      photoUrl: item.photoLink || undefined,
+                                    })
+                                  }
+                                >🎉</button>
                                 {item.photoLink && (
                                   <button title="View Photo" style={invoiceIconBtn(theme)} onClick={() => setBirthdayPreview({ title: `${item.name} — Birthday Photo`, image: item.photoLink! })}>🖼</button>
                                 )}
@@ -4587,6 +4611,25 @@ export default function AdminDashboard({
               />
             </div>
           </div>
+        )}
+
+        {cardPerson && (
+          <BirthdayCardModal
+            person={cardPerson}
+            employees={employees.map((e) => ({ name: e.name, email: e.email }))}
+            settings={birthdayCardSettings}
+            onClose={() => setCardPerson(null)}
+            showToast={showToast}
+          />
+        )}
+
+        {showCardSettings && (
+          <BirthdayCardSettingsModal
+            settings={birthdayCardSettings}
+            onSave={onSaveBirthdayCardSettings}
+            onClose={() => setShowCardSettings(false)}
+            showToast={showToast}
+          />
         )}
         </div>{/* end animation wrapper */}
       </main>
