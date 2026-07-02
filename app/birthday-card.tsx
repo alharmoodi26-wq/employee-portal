@@ -42,8 +42,11 @@ export type BirthdayPerson = {
 export type CardEmployee = { name: string; email: string };
 
 // ── Landscape canvas dimensions (A4 landscape ratio) ─────────────────────
+// Logical drawing size; the backing canvas is rendered at RENDER_SCALE× this
+// for crisp photos and text in the exported PNG/PDF (no design change).
 const CARD_W = 1600;
 const CARD_H = 1131;
+const RENDER_SCALE = 2;
 
 const TEMPLATES: { id: CardTemplateId; name: string; hint: string }[] = [
   { id: "eihg", name: "Executive Navy", hint: "Brand navy + gold" },
@@ -647,6 +650,11 @@ export function BirthdayCardModal({
     if (!canvas || !assets.ready) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    // Render into a high-resolution backing store with high-quality resampling
+    // so employee photos and text stay sharp in the exported PNG/PDF.
+    ctx.setTransform(RENDER_SCALE, 0, 0, RENDER_SCALE, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     renderTemplate(ctx, template, {
       W: CARD_W,
       H: CARD_H,
@@ -844,8 +852,8 @@ export function BirthdayCardModal({
             >
               <canvas
                 ref={canvasRef}
-                width={CARD_W}
-                height={CARD_H}
+                width={CARD_W * RENDER_SCALE}
+                height={CARD_H * RENDER_SCALE}
                 className="block h-full w-full"
               />
             </div>
