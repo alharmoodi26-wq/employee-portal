@@ -164,6 +164,7 @@ type AdminDashboardProps = {
     birthday: string;
     photo: File | null;
   }) => Promise<void>;
+  onUpdateBirthdayPhoto: (birthdayId: string, file: File) => Promise<void>;
   onDeleteBirthday: (birthdayId: string, birthdayName: string) => Promise<void>;
   onAddOHCCertification?: (payload: {
     name: string;
@@ -854,6 +855,7 @@ export default function AdminDashboard({
   onDeleteAttendance,
   onAssignTask,
   onAddBirthday,
+  onUpdateBirthdayPhoto,
   onDeleteBirthday,
   onAddOHCCertification,
   onUpdateOHCCertification,
@@ -943,6 +945,32 @@ export default function AdminDashboard({
   const [showBirthdayModal, setShowBirthdayModal] = useState(false);
   const [cardPerson, setCardPerson] = useState<BirthdayPerson | null>(null);
   const [showCardSettings, setShowCardSettings] = useState(false);
+  // Replace-photo for an existing birthday entry.
+  const bdPhotoInputRef = useRef<HTMLInputElement>(null);
+  const bdPhotoTargetId = useRef<string | null>(null);
+  const [bdPhotoUploadingId, setBdPhotoUploadingId] = useState<string | null>(null);
+
+  const handleBirthdayPhotoPick = async (file: File | null) => {
+    const id = bdPhotoTargetId.current;
+    bdPhotoTargetId.current = null;
+    if (!file || !id) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("error", "Please choose an image file.");
+      return;
+    }
+    setBdPhotoUploadingId(id);
+    try {
+      await onUpdateBirthdayPhoto(id, file);
+      showToast("success", "Photo updated.");
+    } catch (e) {
+      showToast(
+        "error",
+        e instanceof Error ? e.message : "Could not update the photo."
+      );
+    } finally {
+      setBdPhotoUploadingId(null);
+    }
+  };
   const [showManageBirthdaysModal, setShowManageBirthdaysModal] = useState(false);
   const [birthdaySaving, setBirthdaySaving] = useState(false);
   const [birthdayPhoto, setBirthdayPhoto] = useState<File | null>(null);
@@ -3867,6 +3895,18 @@ export default function AdminDashboard({
                     />
                   </div>
 
+                  {/* Hidden input for replacing an entry's photo */}
+                  <input
+                    ref={bdPhotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      handleBirthdayPhotoPick(e.target.files?.[0] ?? null);
+                      e.target.value = "";
+                    }}
+                  />
+
                   {/* Birthday cards grid */}
                   {sortedBirthdays.length > 0 ? (
                     <div className="birthday-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
@@ -3933,6 +3973,20 @@ export default function AdminDashboard({
                                     });
                                   }}
                                 >🎉</button>
+                                <button
+                                  title={item.photoLink ? "Change photo (upload higher quality)" : "Upload photo"}
+                                  disabled={bdPhotoUploadingId === item.id}
+                                  style={{
+                                    ...invoiceIconBtn(theme),
+                                    color: "#6366f1",
+                                    opacity: bdPhotoUploadingId === item.id ? 0.5 : 1,
+                                    cursor: bdPhotoUploadingId === item.id ? "progress" : "pointer",
+                                  }}
+                                  onClick={() => {
+                                    bdPhotoTargetId.current = item.id;
+                                    bdPhotoInputRef.current?.click();
+                                  }}
+                                >{bdPhotoUploadingId === item.id ? "⏳" : "📷"}</button>
                                 {item.photoLink && (
                                   <button title="View Photo" style={invoiceIconBtn(theme)} onClick={() => setBirthdayPreview({ title: `${item.name} — Birthday Photo`, image: item.photoLink! })}>🖼</button>
                                 )}

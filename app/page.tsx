@@ -2004,6 +2004,18 @@ export default function HomePage() {
     });
   };
 
+  // Replace/upload a higher-quality photo for an existing birthday entry.
+  // Stores the raw file (no compression) so the card gets full resolution.
+  const updateBirthdayPhoto = async (birthdayId: string, file: File) => {
+    const files = await uploadFilesToStorage("birthday-photos", "shared", [file]);
+    const path = files[0]?.path ?? "";
+    if (!path) throw new Error("Upload failed.");
+    await updateDoc(doc(db, "birthdays", birthdayId), {
+      photoPath: path,
+      photoLink: "", // re-resolved from the new path by the live listener
+    });
+  };
+
   const saveBirthdayCardSettings = async (settings: BirthdayCardSettings) => {
     await setDoc(
       doc(db, "config", "birthdayCard"),
@@ -2667,6 +2679,7 @@ export default function HomePage() {
           onDeleteAttendance={deleteAttendance}
           onAssignTask={assignTask}
           onAddBirthday={addBirthday}
+          onUpdateBirthdayPhoto={updateBirthdayPhoto}
           onDeleteBirthday={deleteBirthday}
           onAddOHCCertification={addOHCCertification}
           onUpdateOHCCertification={updateOHCCertification}
