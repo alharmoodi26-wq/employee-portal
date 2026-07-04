@@ -785,7 +785,12 @@ export function BirthdayCardModal({
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || "Failed to send email.");
+      if (!res.ok) {
+        const detail = [data?.error, data?.detail]
+          .filter(Boolean)
+          .join(" — ");
+        throw new Error(detail || "Failed to send email.");
+      }
       showToast("success", `Card sent to ${recipient.trim()}.`);
     } catch (e) {
       showToast(
