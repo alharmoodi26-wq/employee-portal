@@ -7,12 +7,26 @@ import { NextResponse } from "next/server";
 // it from our own origin, the canvas stays clean and PNG/PDF/email export work
 // for any image source without changing bucket configuration.
 //
-// Restricted to known image hosts to avoid being an open SSRF proxy.
-const ALLOWED_HOSTS = new Set([
+// Restricted to Google/Firebase-owned image hosts to avoid being an open SSRF
+// proxy, while covering both the classic download host and the new
+// *.firebasestorage.app bucket domains.
+const ALLOWED_EXACT = new Set([
   "firebasestorage.googleapis.com",
   "storage.googleapis.com",
-  "lh3.googleusercontent.com",
+  "storage.cloud.google.com",
 ]);
+const ALLOWED_SUFFIXES = [
+  ".firebasestorage.app",
+  ".googleapis.com",
+  ".googleusercontent.com",
+];
+
+function hostAllowed(hostname: string): boolean {
+  return (
+    ALLOWED_EXACT.has(hostname) ||
+    ALLOWED_SUFFIXES.some((s) => hostname.endsWith(s))
+  );
+}
 
 export async function GET(request: Request) {
   const target = new URL(request.url).searchParams.get("url");
@@ -27,9 +41,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid url." }, { status: 400 });
   }
 
-  if (parsed.protocol !== "https:" || !ALLOWED_HOSTS.has(parsed.hostname)) {
+  if (parsed.protocol !== "https:" || !hostAllowed(parsed.hostname)) {
     return NextResponse.json(
-      { error: "This image host is not allowed." },
+      { error: `Image host not allowed: ${parsed.hostname}` },
       { status: 403 }
     );
   }

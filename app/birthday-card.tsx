@@ -189,36 +189,70 @@ function formatBirthday(iso: string): string {
   return `${months[m]} ${d}`;
 }
 
-// Cross-origin images (e.g. Firebase Storage) are routed through our
-// same-origin proxy so the canvas isn't tainted and exports work. Same-origin
-// URLs and data URLs are used as-is.
-function toLoadableSrc(src: string): string {
-  if (!src || src.startsWith("data:")) return src;
+function isSameOrigin(src: string): boolean {
   try {
-    const u = new URL(src, window.location.origin);
-    if (u.origin === window.location.origin) return src;
-    return `/api/image-proxy?url=${encodeURIComponent(src)}`;
+    return new URL(src, window.location.origin).origin === window.location.origin;
   } catch {
-    return src;
+    return false;
   }
 }
 
-function loadImage(src: string): Promise<HTMLImageElement | null> {
+function imgFromUrl(url: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
-    if (!src) return resolve(null);
-    const primary = toLoadableSrc(src);
-    // 1) Proxied same-origin load with CORS → clean canvas, fully exportable.
-    // 2) If that fails, fall back to the original URL without CORS so the photo
-    //    still appears in the preview (export then degrades gracefully).
-    const attempt = (url: string, useCors: boolean, onFail: () => void) => {
-      const img = new Image();
-      if (useCors) img.crossOrigin = "anonymous";
-      img.onload = () => resolve(img);
-      img.onerror = onFail;
-      img.src = url;
-    };
-    attempt(primary, true, () => attempt(src, false, () => resolve(null)));
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
   });
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result as string);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(blob);
+  });
+}
+
+// Loads an image so it can be drawn AND exported (PNG/PDF/email) without
+// tainting the canvas:
+//   • data URLs / same-origin images → drawn directly (already clean)
+//   • cross-origin images (Firebase Storage, etc.) → fetched through our
+//     same-origin proxy and inlined as a data URL, which never taints.
+// Falls back to a direct (display-only) load as a last resort, and logs the
+// exact failing URL/host to the console for diagnostics.
+async function loadImage(src: string): Promise<HTMLImageElement | null> {
+  if (!src) return null;
+  if (src.startsWith("data:") || isSameOrigin(src)) {
+    return imgFromUrl(src);
+  }
+  try {
+    const res = await fetch(`/api/image-proxy?url=${encodeURIComponent(src)}`);
+    if (res.ok) {
+      const dataUrl = await blobToDataUrl(await res.blob());
+      return imgFromUrl(dataUrl);
+    }
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[BirthdayCard] image proxy returned ${res.status} for host "${
+        (() => {
+          try {
+            return new URL(src).host;
+          } catch {
+            return "?";
+          }
+        })()
+      }" — ${src}`
+    );
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn(`[BirthdayCard] image proxy fetch error for ${src}`, e);
+  }
+  // Last resort: display the photo even though export will be limited.
+  // eslint-disable-next-line no-console
+  console.warn(`[BirthdayCard] falling back to direct (non-exportable) load: ${src}`);
+  return imgFromUrl(src);
 }
 
 type DrawEnv = {
