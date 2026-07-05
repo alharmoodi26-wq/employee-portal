@@ -846,7 +846,11 @@ export function BirthdayCardModal({
         throw new Error(`(${res.status}) ${full}`);
       }
 
-      showToast("success", `Card sent to ${recipient.trim()}.`);
+      // Close the modal first, then show the success toast on the main page so
+      // it isn't hidden behind the modal overlay.
+      onClose();
+      showToast("success", `Birthday card sent to HR (${recipient.trim()}).`);
+      return;
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("[BirthdayCard] sendEmail error", e);
