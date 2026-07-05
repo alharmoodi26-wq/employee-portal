@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 // to be set in the environment (e.g. Vercel project env vars).
 export async function POST(request: Request) {
   try {
-    const { to, name, message, imageBase64, mimeType } = await request.json();
+    const { to, name, birthday, imageBase64, mimeType } = await request.json();
 
     const approxBytes = typeof imageBase64 === "string"
       ? Math.round((imageBase64.length * 3) / 4)
@@ -54,17 +54,28 @@ export async function POST(request: Request) {
       );
     }
 
-    const safeName = typeof name === "string" && name.trim() ? name.trim() : "you";
-    const greeting =
-      typeof message === "string" && message.trim()
-        ? message.trim()
-        : "Wishing you a very happy birthday!";
+    const safeName =
+      typeof name === "string" && name.trim() ? name.trim() : "the employee";
+    const birthdayLabel =
+      typeof birthday === "string" && birthday.trim()
+        ? birthday.trim()
+        : "their upcoming date";
 
+    // Internal HR notification — the card is attached for HR to forward to the
+    // employee through the appropriate channel (not sent to the employee here).
     const html = `
       <div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a;">
-        <p style="font-size:16px;line-height:1.6;">Dear ${escapeHtml(safeName)},</p>
-        <p style="font-size:16px;line-height:1.6;white-space:pre-wrap;">${escapeHtml(greeting)}</p>
-        <p style="font-size:14px;color:#64748b;">Your birthday card is attached. 🎉</p>
+        <p style="font-size:16px;line-height:1.6;">Hello HR Team,</p>
+        <p style="font-size:16px;line-height:1.6;">
+          Please find attached the birthday card for
+          <strong>${escapeHtml(safeName)}</strong>, whose birthday is on
+          <strong>${escapeHtml(birthdayLabel)}</strong>.
+        </p>
+        <p style="font-size:16px;line-height:1.6;">
+          Kindly review the card and send it to the employee through the
+          appropriate communication channel.
+        </p>
+        <p style="font-size:16px;line-height:1.6;">Thank you.</p>
       </div>`;
 
     const ext = mimeType === "image/png" ? "png" : "jpg";
@@ -79,7 +90,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         from: fromEmail,
         to: [to],
-        subject: `🎉 Happy Birthday, ${safeName}!`,
+        subject: `🎉 Birthday Card Ready – ${safeName}`,
         html,
         attachments: [{ filename: `birthday-card.${ext}`, content: imageBase64 }],
       }),

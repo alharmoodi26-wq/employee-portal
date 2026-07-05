@@ -4682,7 +4682,6 @@ export default function AdminDashboard({
         {cardPerson && (
           <BirthdayCardModal
             person={cardPerson}
-            employees={employees.map((e) => ({ name: e.name, email: e.email }))}
             settings={birthdayCardSettings}
             onClose={() => setCardPerson(null)}
             showToast={showToast}

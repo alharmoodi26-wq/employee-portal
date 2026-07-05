@@ -18,6 +18,7 @@ export type BirthdayCardSettings = {
   primaryColor: string; // hex
   accentColor: string; // hex
   defaultTemplate: CardTemplateId;
+  hrEmail: string; // where the internal HR notification is sent
 };
 
 export type CardTemplateId = "eihg" | "festive" | "minimal" | "luxe";
@@ -30,6 +31,7 @@ export const DEFAULT_BIRTHDAY_CARD_SETTINGS: BirthdayCardSettings = {
   primaryColor: "#0f1c35",
   accentColor: "#f0c040",
   defaultTemplate: "eihg",
+  hrEmail: "",
 };
 
 export type BirthdayPerson = {
@@ -37,9 +39,6 @@ export type BirthdayPerson = {
   birthday: string; // YYYY-MM-DD
   photoUrl?: string;
 };
-
-// Employee directory entry (subset) used only to auto-fill the recipient email.
-export type CardEmployee = { name: string; email: string };
 
 // ── Landscape canvas dimensions (A4 landscape ratio) ─────────────────────
 // Logical drawing size; the backing canvas is rendered at RENDER_SCALE× this
@@ -627,13 +626,11 @@ function ActionTile({
 // ── Preview + actions modal ──────────────────────────────────────────────
 export function BirthdayCardModal({
   person,
-  employees,
   settings,
   onClose,
   showToast,
 }: {
   person: BirthdayPerson;
-  employees: CardEmployee[];
   settings: BirthdayCardSettings;
   onClose: () => void;
   showToast: (type: ToastType, message: string) => void;
@@ -651,15 +648,10 @@ export function BirthdayCardModal({
     ready: boolean;
   }>({ photo: null, logo: null, ready: false });
 
-  // Auto-fill recipient email from the employee directory (case-insensitive).
-  const matchedEmail = useMemo(() => {
-    const n = person.name.trim().toLowerCase();
-    return (
-      employees.find((e) => e.name.trim().toLowerCase() === n)?.email || ""
-    );
-  }, [employees, person.name]);
-  const [recipient, setRecipient] = useState(matchedEmail);
-  useEffect(() => setRecipient(matchedEmail), [matchedEmail]);
+  // The card is emailed to the HR team (an internal notification), so default
+  // the recipient to the configured HR address — not the employee.
+  const [recipient, setRecipient] = useState(settings.hrEmail || "");
+  useEffect(() => setRecipient(settings.hrEmail || ""), [settings.hrEmail]);
 
   // Load photo + logo once.
   useEffect(() => {
@@ -823,7 +815,7 @@ export function BirthdayCardModal({
         body: JSON.stringify({
           to: recipient.trim(),
           name: person.name,
-          message,
+          birthday: dateLabel,
           imageBase64: base64,
           mimeType: "image/jpeg",
         }),
@@ -1010,22 +1002,24 @@ export function BirthdayCardModal({
             </Section>
 
             <Section
-              label="Recipient email"
+              label="Send to (HR team)"
               theme={theme}
               hint={
-                matchedEmail ? (
+                settings.hrEmail ? (
                   <span style={{ color: "#16a34a", fontWeight: 700 }}>
-                    ✓ auto-filled
+                    ✓ from settings
                   </span>
                 ) : (
-                  <span style={{ color: theme.subtleText }}>enter manually</span>
+                  <span style={{ color: theme.subtleText }}>
+                    set a default in ⚙ Card Settings
+                  </span>
                 )
               }
             >
               <input
                 value={recipient}
                 onChange={(e) => setRecipient(e.target.value)}
-                placeholder="name@company.com"
+                placeholder="hr-team@company.com"
                 type="email"
                 className="w-full"
                 style={inputStyle()}
@@ -1193,6 +1187,17 @@ export function BirthdayCardSettingsModal({
           <input
             value={form.companyName}
             onChange={(e) => set("companyName", e.target.value)}
+            style={inputStyle()}
+          />
+        )}
+
+        {field(
+          "HR team email (card recipient)",
+          <input
+            value={form.hrEmail}
+            onChange={(e) => set("hrEmail", e.target.value)}
+            type="email"
+            placeholder="hr-team@company.com"
             style={inputStyle()}
           />
         )}
