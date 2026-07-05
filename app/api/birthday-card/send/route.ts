@@ -5,7 +5,18 @@ import { NextResponse } from "next/server";
 // to be set in the environment (e.g. Vercel project env vars).
 export async function POST(request: Request) {
   try {
-    const { to, name, message, imageBase64 } = await request.json();
+    const { to, name, message, imageBase64, mimeType } = await request.json();
+
+    const approxBytes = typeof imageBase64 === "string"
+      ? Math.round((imageBase64.length * 3) / 4)
+      : 0;
+    console.log("[birthday-card/send] incoming", {
+      to,
+      name,
+      base64Len: typeof imageBase64 === "string" ? imageBase64.length : 0,
+      approxImageKB: Math.round(approxBytes / 1024),
+      mimeType,
+    });
 
     if (typeof to !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
       return NextResponse.json(
@@ -17,6 +28,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Card image is missing." },
         { status: 400 }
+      );
+    }
+    // Resend caps total message size at ~40 MB; a base64 attachment near that
+    // is almost certainly a payload problem worth reporting clearly.
+    if (approxBytes > 18 * 1024 * 1024) {
+      return NextResponse.json(
+        {
+          error: "Card image is too large to email.",
+          detail: `Attachment is ~${Math.round(approxBytes / 1024 / 1024)} MB.`,
+        },
+        { status: 413 }
       );
     }
 
@@ -45,6 +67,9 @@ export async function POST(request: Request) {
         <p style="font-size:14px;color:#64748b;">Your birthday card is attached. 🎉</p>
       </div>`;
 
+    const ext = mimeType === "image/png" ? "png" : "jpg";
+    console.log("[birthday-card/send] calling Resend", { from: fromEmail, to });
+
     const resp = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -56,27 +81,40 @@ export async function POST(request: Request) {
         to: [to],
         subject: `🎉 Happy Birthday, ${safeName}!`,
         html,
-        attachments: [
-          {
-            filename: "birthday-card.png",
-            content: imageBase64,
-          },
-        ],
+        attachments: [{ filename: `birthday-card.${ext}`, content: imageBase64 }],
       }),
     });
 
+    const respText = await resp.text().catch(() => "");
+    console.log("[birthday-card/send] Resend status", resp.status, respText);
+
     if (!resp.ok) {
-      const detail = await resp.text().catch(() => "");
+      // Surface the exact provider error (e.g. domain not verified, invalid
+      // from, rate limit) rather than a generic message.
+      let providerMsg = respText;
+      try {
+        const parsed = JSON.parse(respText);
+        providerMsg = parsed?.message || parsed?.error || respText;
+      } catch {
+        /* keep raw text */
+      }
       return NextResponse.json(
-        { error: "Email provider rejected the request.", detail },
+        {
+          error: `Resend rejected the email (HTTP ${resp.status}).`,
+          detail: providerMsg,
+        },
         { status: 502 }
       );
     }
 
     return NextResponse.json({ ok: true });
   } catch (e) {
+    console.error("[birthday-card/send] unexpected error", e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Unexpected error." },
+      {
+        error: e instanceof Error ? e.message : "Unexpected server error.",
+        detail: e instanceof Error ? e.stack?.slice(0, 500) : String(e),
+      },
       { status: 500 }
     );
   }

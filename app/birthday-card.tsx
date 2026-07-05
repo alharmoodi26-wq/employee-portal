@@ -710,11 +710,11 @@ export function BirthdayCardModal({
   const TAINT_MSG =
     "The photo can't be exported due to cross-origin restrictions. It shows in the preview, but downloading or emailing requires the image host to allow CORS.";
 
-  const getDataUrl = (): string => {
+  const getDataUrl = (type = "image/png", quality = 0.95): string => {
     const canvas = canvasRef.current;
     if (!canvas) return "";
     try {
-      return canvas.toDataURL("image/png", 0.95);
+      return canvas.toDataURL(type, quality);
     } catch {
       return ""; // tainted canvas
     }
@@ -803,11 +803,20 @@ export function BirthdayCardModal({
     if (!recipient.trim() || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(recipient.trim())) {
       return showToast("error", "Enter a valid recipient email.");
     }
-    const dataUrl = getDataUrl();
-    if (!dataUrl) return showToast("error", TAINT_MSG);
+    // Use a JPEG for the attachment — a full-res PNG can exceed the API
+    // request-body limit and fail before ever reaching Resend.
+    const jpegDataUrl = getDataUrl("image/jpeg", 0.9);
+    if (!jpegDataUrl) return showToast("error", TAINT_MSG);
+    const base64 = jpegDataUrl.split(",")[1] || "";
+    // eslint-disable-next-line no-console
+    console.log(
+      `[BirthdayCard] emailing to ${recipient.trim()} — attachment ~${Math.round(
+        (base64.length * 3) / 4 / 1024
+      )} KB`
+    );
+
     setBusy("email");
     try {
-      const base64 = dataUrl.split(",")[1] || "";
       const res = await fetch("/api/birthday-card/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -816,20 +825,45 @@ export function BirthdayCardModal({
           name: person.name,
           message,
           imageBase64: base64,
+          mimeType: "image/jpeg",
         }),
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail = [data?.error, data?.detail]
-          .filter(Boolean)
-          .join(" — ");
-        throw new Error(detail || "Failed to send email.");
+
+      // Read the raw body first so we can surface non-JSON errors (e.g. a 413
+      // payload-too-large page) instead of a generic message.
+      const raw = await res.text();
+      let data: { error?: string; detail?: string } = {};
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        /* non-JSON response */
       }
+
+      if (!res.ok) {
+        const full =
+          [data.error, data.detail].filter(Boolean).join(" — ") ||
+          raw ||
+          `HTTP ${res.status}`;
+        // eslint-disable-next-line no-console
+        console.error("[BirthdayCard] email failed", {
+          status: res.status,
+          error: data.error,
+          detail: data.detail,
+          raw: raw.slice(0, 1000),
+        });
+        throw new Error(`(${res.status}) ${full}`);
+      }
+
       showToast("success", `Card sent to ${recipient.trim()}.`);
     } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("[BirthdayCard] sendEmail error", e);
       showToast(
         "error",
-        e instanceof Error ? e.message : "Could not send the email."
+        (e instanceof Error ? e.message : "Could not send the email.").slice(
+          0,
+          400
+        )
       );
     } finally {
       setBusy(null);
