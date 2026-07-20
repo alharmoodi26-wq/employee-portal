@@ -115,6 +115,7 @@ type BirthdayEntry = {
   birthday: string;
   photoPath?: string;
   photoLink?: string;
+  gender?: "male" | "female";
 };
 
 type OHCCertificationEntry = {
@@ -930,12 +931,18 @@ export default function HomePage() {
                 }
               }
 
+              const gender =
+                data.gender === "male" || data.gender === "female"
+                  ? data.gender
+                  : undefined;
+
               return {
                 id: document.id,
                 name: data.name ?? "",
                 birthday: data.birthday ?? "",
                 photoPath: data.photoPath ?? "",
                 photoLink,
+                gender,
               } as BirthdayEntry;
             })
           );
@@ -1981,6 +1988,7 @@ export default function HomePage() {
     name: string;
     birthday: string;
     photo: File | null;
+    gender?: "male" | "female";
   }) => {
     let uploaded = {
       photoPath: "",
@@ -2001,6 +2009,7 @@ export default function HomePage() {
       photoPath: uploaded.photoPath,
       photoLink: uploaded.photoLink,
       createdAt: serverTimestamp(),
+      ...(payload.gender ? { gender: payload.gender } : {}),
     });
   };
 

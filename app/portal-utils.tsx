@@ -47,6 +47,7 @@ export type Employee = {
   email: string;
   completion: number;
   profilePhotoUrl?: string;
+  gender?: "male" | "female";
 };
 
 export type WorkItem = {

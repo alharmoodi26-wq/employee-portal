@@ -63,6 +63,7 @@ type BirthdayEntry = {
   birthday: string;
   photoPath?: string;
   photoLink?: string;
+  gender?: "male" | "female";
 };
 
 type OHCCertificationEntry = {
@@ -163,6 +164,7 @@ type AdminDashboardProps = {
     name: string;
     birthday: string;
     photo: File | null;
+    gender?: "male" | "female";
   }) => Promise<void>;
   onUpdateBirthdayPhoto: (birthdayId: string, file: File) => Promise<void>;
   onDeleteBirthday: (birthdayId: string, birthdayName: string) => Promise<void>;
@@ -984,10 +986,16 @@ export default function AdminDashboard({
 
   const [reportRange, setReportRange] = useState<ReportDateRange>({ from: "", to: "" });
   const [selectedTaskFiles, setSelectedTaskFiles] = useState<File[]>([]);
-  const [birthdayForm, setBirthdayForm] = useState({
+  const [birthdayForm, setBirthdayForm] = useState<{
+    name: string;
+    birthday: string;
+    photoName: string;
+    gender: "" | "male" | "female";
+  }>({
     name: "",
     birthday: "",
     photoName: "",
+    gender: "",
   });
 
   const [ohcPreview, setOhcPreview] = useState<{
@@ -1941,12 +1949,14 @@ export default function AdminDashboard({
         name: birthdayForm.name,
         birthday: birthdayForm.birthday,
         photo: birthdayPhoto,
+        gender: birthdayForm.gender || undefined,
       });
 
       setBirthdayForm({
         name: "",
         birthday: "",
         photoName: "",
+        gender: "",
       });
       setBirthdayPhoto(null);
       setShowBirthdayModal(false);
@@ -3970,6 +3980,7 @@ export default function AdminDashboard({
                                         item.photoLink ||
                                         emp?.profilePhotoUrl ||
                                         undefined,
+                                      gender: item.gender ?? emp?.gender,
                                     });
                                   }}
                                 >🎉</button>
@@ -4315,6 +4326,18 @@ export default function AdminDashboard({
                   <input type="date" style={inputStyle()} value={birthdayForm.birthday} onChange={(e) => setBirthdayForm((prev) => ({ ...prev, birthday: e.target.value }))} />
                 </div>
                 <div>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Gender (optional)</label>
+                  <select
+                    style={inputStyle()}
+                    value={birthdayForm.gender}
+                    onChange={(e) => setBirthdayForm((prev) => ({ ...prev, gender: e.target.value as "" | "male" | "female" }))}
+                  >
+                    <option value="">Not specified</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                  </select>
+                </div>
+                <div>
                   <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Photo (optional)</label>
                   <input type="file" accept="image/*" style={inputStyle()} onChange={(e) => { const f = e.target.files?.[0] || null; setBirthdayPhoto(f); setBirthdayForm((prev) => ({ ...prev, photoName: f ? f.name : "" })); }} />
                   {birthdayForm.photoName && <div style={{ marginTop: 6, fontSize: 12, color: "#ec4899", display: "flex", alignItems: "center", gap: 4 }}>🖼 {birthdayForm.photoName}</div>}
@@ -4322,7 +4345,7 @@ export default function AdminDashboard({
               </div>
 
               <div style={{ padding: "14px 24px", borderTop: `1px solid ${theme.cardBorder}`, display: "flex", justifyContent: "flex-end", gap: 10, background: theme.softCardBackground }}>
-                <button style={buttonStyle(false)} onClick={() => { setShowBirthdayModal(false); setBirthdayPhoto(null); setBirthdayForm({ name: "", birthday: "", photoName: "" }); }} disabled={birthdaySaving}>Cancel</button>
+                <button style={buttonStyle(false)} onClick={() => { setShowBirthdayModal(false); setBirthdayPhoto(null); setBirthdayForm({ name: "", birthday: "", photoName: "", gender: "" }); }} disabled={birthdaySaving}>Cancel</button>
                 <button style={{ ...buttonStyle(true), opacity: birthdaySaving ? 0.7 : 1 }} onClick={handleAddBirthday} disabled={birthdaySaving}>
                   {birthdaySaving ? "Saving…" : "Save Birthday"}
                 </button>

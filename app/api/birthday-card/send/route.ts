@@ -3,9 +3,11 @@ import { NextResponse } from "next/server";
 // Sends a birthday card by email via Resend (same provider the system already
 // uses in Firebase Functions). Requires RESEND_API_KEY and RESEND_FROM_EMAIL
 // to be set in the environment (e.g. Vercel project env vars).
+const DEFAULT_FROM_TEXT = "ABU NADER GROUP OF COMPANIES MANAGEMENT & STAFF";
+
 export async function POST(request: Request) {
   try {
-    const { to, name, birthday, imageBase64, mimeType } = await request.json();
+    const { to, name, birthday, imageBase64, mimeType, greeting } = await request.json();
 
     const approxBytes = typeof imageBase64 === "string"
       ? Math.round((imageBase64.length * 3) / 4)
@@ -60,25 +62,37 @@ export async function POST(request: Request) {
       typeof birthday === "string" && birthday.trim()
         ? birthday.trim()
         : "their upcoming date";
+    const greetingText =
+      typeof greeting === "string" && greeting.trim() ? greeting.trim() : "";
+    const mime = mimeType === "image/png" ? "image/png" : "image/jpeg";
 
-    // Internal HR notification — the card is attached for HR to forward to the
-    // employee through the appropriate channel (not sent to the employee here).
+    // A warm, ready-to-send birthday email: the selected greeting up top,
+    // the generated card embedded inline (as a data URI — some clients block
+    // those, so the card is also attached as a regular file below), and the
+    // company sign-off at the bottom.
     const html = `
       <div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:640px;margin:0 auto;color:#0f172a;">
-        <p style="font-size:16px;line-height:1.6;">Hello HR Team,</p>
-        <p style="font-size:16px;line-height:1.6;">
-          Please find attached the birthday card for
-          <strong>${escapeHtml(safeName)}</strong>, whose birthday is on
-          <strong>${escapeHtml(birthdayLabel)}</strong>.
+        <div style="text-align:center;padding:28px 20px 6px;">
+          <h1 style="margin:0;font-size:26px;line-height:1.3;color:#0f1c35;">🎉 Happy Birthday, ${escapeHtml(safeName)}!</h1>
+        </div>
+        ${
+          greetingText
+            ? `<p style="font-size:16px;line-height:1.7;text-align:center;color:#334155;padding:10px 24px 0;">${escapeHtml(greetingText)}</p>`
+            : ""
+        }
+        <div style="text-align:center;padding:22px 24px 6px;">
+          <img src="data:${mime};base64,${imageBase64}" alt="Birthday card for ${escapeHtml(safeName)}" style="max-width:100%;border-radius:14px;box-shadow:0 10px 30px rgba(15,23,42,0.15);"/>
+        </div>
+        <p style="font-size:14px;line-height:1.6;text-align:center;color:#64748b;padding:6px 24px 0;">
+          Birthday: <strong>${escapeHtml(birthdayLabel)}</strong>
         </p>
-        <p style="font-size:16px;line-height:1.6;">
-          Kindly review the card and send it to the employee through the
-          appropriate communication channel.
-        </p>
-        <p style="font-size:16px;line-height:1.6;">Thank you.</p>
+        <div style="margin-top:22px;padding:18px 24px 26px;border-top:1px solid #e2e8f0;text-align:center;">
+          <p style="font-size:12px;letter-spacing:0.06em;color:#94a3b8;margin:0;text-transform:uppercase;">From</p>
+          <p style="font-size:14px;font-weight:700;color:#0f1c35;margin:4px 0 0;">${escapeHtml(DEFAULT_FROM_TEXT)}</p>
+        </div>
       </div>`;
 
-    const ext = mimeType === "image/png" ? "png" : "jpg";
+    const ext = mime === "image/png" ? "png" : "jpg";
     console.log("[birthday-card/send] calling Resend", { from: fromEmail, to });
 
     const resp = await fetch("https://api.resend.com/emails", {
@@ -90,7 +104,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         from: fromEmail,
         to: [to],
-        subject: `🎉 Birthday Card Ready – ${safeName}`,
+        subject: "Happy Birthday from Abu Nader Group of Companies! 🎉",
         html,
         attachments: [{ filename: `birthday-card.${ext}`, content: imageBase64 }],
       }),

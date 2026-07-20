@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   buttonStyle,
   cardStyle,
@@ -11,50 +11,178 @@ import {
 } from "./portal-utils";
 
 // ── Settings (persisted in Firestore: config/birthdayCard) ───────────────
+export type CardTemplateId =
+  | "blue-balloons"
+  | "dark-blue"
+  | "gold"
+  | "green"
+  | "modern-corporate"
+  | "pink-balloons"
+  | "purple"
+  | "rose-gold"
+  | "floral"
+  | "elegant";
+
 export type BirthdayCardSettings = {
-  companyName: string;
-  logoDataUrl: string; // base64 data URL; empty → default /eihg-logo.jpeg
-  defaultMessage: string;
-  primaryColor: string; // hex
-  accentColor: string; // hex
-  defaultTemplate: CardTemplateId;
+  fromText: string;
   hrEmail: string; // where the internal HR notification is sent
-};
-
-export type CardTemplateId = "eihg" | "festive" | "minimal" | "luxe";
-
-export const DEFAULT_BIRTHDAY_CARD_SETTINGS: BirthdayCardSettings = {
-  companyName: "Emirates International Holding Group",
-  logoDataUrl: "",
-  defaultMessage:
-    "Wishing you a wonderful birthday filled with joy, success, and happiness. Thank you for being a valued part of our team!",
-  primaryColor: "#0f1c35",
-  accentColor: "#f0c040",
-  defaultTemplate: "eihg",
-  hrEmail: "",
+  defaultTemplate: CardTemplateId;
+  randomTemplate: boolean;
+  greetings: string[];
+  defaultGreeting: string;
+  randomGreeting: boolean;
+  // Legacy fields kept only so old Firestore documents keep spreading
+  // cleanly without crashing — no longer read by the UI.
+  companyName?: string;
+  logoDataUrl?: string;
+  defaultMessage?: string;
+  primaryColor?: string;
+  accentColor?: string;
 };
 
 export type BirthdayPerson = {
   name: string;
   birthday: string; // YYYY-MM-DD
   photoUrl?: string;
+  gender?: "male" | "female";
 };
 
-// ── Landscape canvas dimensions (A4 landscape ratio) ─────────────────────
-// Logical drawing size; the backing canvas is rendered at RENDER_SCALE× this
-// for crisp photos and text in the exported PNG/PDF (no design change).
-const CARD_W = 1600;
-const CARD_H = 1131;
-const RENDER_SCALE = 2;
-
-const TEMPLATES: { id: CardTemplateId; name: string; hint: string }[] = [
-  { id: "eihg", name: "Executive Navy", hint: "Brand navy + gold" },
-  { id: "festive", name: "Festive", hint: "Balloons & confetti" },
-  { id: "minimal", name: "Minimal", hint: "Clean & elegant" },
-  { id: "luxe", name: "Gold Luxe", hint: "Dark & premium" },
+const DEFAULT_GREETINGS: string[] = [
+  "Wishing you a wonderful birthday and a successful year ahead.",
+  "Happy Birthday! Wishing you happiness, health, and success.",
+  "Have an amazing birthday filled with joy and happiness.",
+  "Wishing you all the best on your special day.",
+  "May your birthday bring you happiness and success throughout the year.",
 ];
 
-// ── Small drawing helpers ────────────────────────────────────────────────
+export const DEFAULT_BIRTHDAY_CARD_SETTINGS: BirthdayCardSettings = {
+  fromText: "ABU NADER GROUP OF COMPANIES MANAGEMENT & STAFF",
+  hrEmail: "",
+  defaultTemplate: "modern-corporate",
+  randomTemplate: true,
+  greetings: DEFAULT_GREETINGS,
+  defaultGreeting: DEFAULT_GREETINGS[0],
+  randomGreeting: true,
+};
+
+// ── Portrait canvas dimensions ────────────────────────────────────────────
+// Logical drawing size; the backing canvas is rendered at RENDER_SCALE× this
+// for crisp photos and text in the exported PNG/PDF.
+const CARD_W = 1200;
+const CARD_H = 1600;
+const RENDER_SCALE = 2;
+
+// ── Type system (3 roles) ─────────────────────────────────────────────────
+const UTILITY_FONT = "'Trebuchet MS','Segoe UI',Arial,sans-serif";
+const SERIF_FONT = "Georgia,'Times New Roman',serif";
+const SCRIPT_FONT = "'Brush Script MT','Segoe Script',cursive";
+
+// ── Template registry (data, not draw functions) ──────────────────────────
+type DecoKind = "balloons" | "confetti" | "floral" | "corners" | "sparkle" | "none";
+
+type CardTemplate = {
+  id: CardTemplateId;
+  name: string;
+  gender: "male" | "female";
+  bg: string[];
+  bgDiagonal?: boolean;
+  panel: boolean;
+  panelColor?: string;
+  ink: string;
+  accent: string;
+  sub: string;
+  ring: string;
+  fallback: string;
+  deco: DecoKind;
+  decoColors: string[];
+  serif: boolean;
+};
+
+const TEMPLATES: CardTemplate[] = [
+  {
+    id: "blue-balloons", name: "Blue Balloons", gender: "male",
+    bg: ["#eaf3ff", "#cfe4ff"], panel: true, panelColor: "#ffffff",
+    ink: "#0b2a5b", accent: "#1f6feb", sub: "#3f5f8a", ring: "#1f6feb", fallback: "#1f6feb",
+    deco: "balloons", decoColors: ["#1f6feb", "#4f9dff", "#88c0ff", "#ffd166"], serif: false,
+  },
+  {
+    id: "dark-blue", name: "Dark Blue", gender: "male",
+    bg: ["#0a1a3a", "#12294f", "#0a1a3a"], bgDiagonal: true, panel: false,
+    ink: "#ffffff", accent: "#9cc4ff", sub: "#c3d4ef", ring: "#9cc4ff", fallback: "#1b3a6b",
+    deco: "sparkle", decoColors: ["#ffffff", "#9cc4ff", "#ffd36b"], serif: false,
+  },
+  {
+    id: "gold", name: "Gold", gender: "male",
+    bg: ["#fff8e6", "#f7e6bf"], panel: true, panelColor: "#fffaf0",
+    ink: "#5a4410", accent: "#c9971a", sub: "#8a6d25", ring: "#c9971a", fallback: "#c9971a",
+    deco: "sparkle", decoColors: ["#e6c257", "#f3d98a", "#ffffff"], serif: true,
+  },
+  {
+    id: "green", name: "Green", gender: "male",
+    bg: ["#e8f8ef", "#bfe9cf"], panel: true, panelColor: "#ffffff",
+    ink: "#0f3d24", accent: "#12a150", sub: "#3a6b4e", ring: "#12a150", fallback: "#12a150",
+    deco: "confetti", decoColors: ["#12a150", "#4cc47f", "#a7e8c1", "#ffd166"], serif: false,
+  },
+  {
+    id: "modern-corporate", name: "Modern Corporate", gender: "male",
+    bg: ["#f5f7fa", "#e8edf3"], panel: false,
+    ink: "#0f1c35", accent: "#2563eb", sub: "#5b6b85", ring: "#2563eb", fallback: "#2563eb",
+    deco: "corners", decoColors: ["#2563eb", "#cbd5e1"], serif: false,
+  },
+  {
+    id: "pink-balloons", name: "Pink Balloons", gender: "female",
+    bg: ["#fff0f6", "#ffd6e8"], panel: true, panelColor: "#ffffff",
+    ink: "#7a1745", accent: "#e83e8c", sub: "#9d5476", ring: "#e83e8c", fallback: "#e83e8c",
+    deco: "balloons", decoColors: ["#e83e8c", "#ff8ac0", "#ffc2dd", "#c084fc"], serif: false,
+  },
+  {
+    id: "purple", name: "Purple", gender: "female",
+    bg: ["#f3ebff", "#dcc7ff"], panel: true, panelColor: "#ffffff",
+    ink: "#3d1a6b", accent: "#7c3aed", sub: "#6b4e9d", ring: "#7c3aed", fallback: "#7c3aed",
+    deco: "confetti", decoColors: ["#7c3aed", "#a978ff", "#d4b8ff", "#ffd166"], serif: false,
+  },
+  {
+    id: "rose-gold", name: "Rose Gold", gender: "female",
+    bg: ["#fdeee9", "#f6d9cf"], panel: true, panelColor: "#fdf3ee",
+    ink: "#6b3b2e", accent: "#b76e79", sub: "#9a6b5e", ring: "#c08497", fallback: "#c08497",
+    deco: "sparkle", decoColors: ["#e8b7a5", "#f3d5c9", "#ffffff"], serif: true,
+  },
+  {
+    id: "floral", name: "Floral", gender: "female",
+    bg: ["#fbf3ee", "#f3e3ea"], panel: true, panelColor: "#fffaf7",
+    ink: "#5a3b52", accent: "#d46a9a", sub: "#8a6377", ring: "#d46a9a", fallback: "#d46a9a",
+    deco: "floral", decoColors: ["#f2a9c4", "#f6c9b8", "#cdeac0", "#ffffff"], serif: true,
+  },
+  {
+    id: "elegant", name: "Elegant", gender: "female",
+    bg: ["#faf5f0", "#f0e6dc"], panel: false,
+    ink: "#3a2f2a", accent: "#b08968", sub: "#7a6a5f", ring: "#b08968", fallback: "#b08968",
+    deco: "corners", decoColors: ["#b08968", "#e6d8c8"], serif: true,
+  },
+];
+
+function getTemplate(id: CardTemplateId): CardTemplate {
+  return TEMPLATES.find((t) => t.id === id) ?? TEMPLATES.find((t) => t.id === "modern-corporate")!;
+}
+
+// Old stored ids ("eihg","festive","minimal","luxe") — or anything else
+// invalid — fall back to the first template of the requested gender, or a
+// neutral default. Use this wherever a stored template id is read.
+function normalizeTemplate(id: string | undefined | null, gender: "male" | "female"): CardTemplateId {
+  const exact = TEMPLATES.find((t) => t.id === id && t.gender === gender);
+  if (exact) return exact.id;
+  const firstOfGender = TEMPLATES.find((t) => t.gender === gender);
+  if (firstOfGender) return firstOfGender.id;
+  return "modern-corporate";
+}
+
+function pickRandomTemplateId(gender: "male" | "female"): CardTemplateId {
+  const pool = TEMPLATES.filter((t) => t.gender === gender);
+  if (!pool.length) return normalizeTemplate(undefined, gender);
+  return pool[Math.floor(Math.random() * pool.length)].id;
+}
+
+// ── Small drawing helpers (reused by the card renderer) ───────────────────
 function roundRect(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -85,6 +213,12 @@ function hexToRgba(hex: string, a: number): string {
   const g = (n >> 8) & 255;
   const b = n & 255;
   return `rgba(${r},${g},${b},${a})`;
+}
+
+// Canvas letterSpacing isn't in every TS lib target yet, and is a no-op on
+// canvases that don't support it — which is fine.
+function setLetterSpacing(ctx: CanvasRenderingContext2D, px: string) {
+  (ctx as unknown as { letterSpacing: string }).letterSpacing = px;
 }
 
 function drawCircularImage(
@@ -134,18 +268,13 @@ function drawCircularImage(
   ctx.restore();
 }
 
-// Wrap text within maxWidth, returns the y after the last line.
-function drawWrapped(
+// Pure line-wrapping (no drawing) — shared by drawWrapped and fitDisplayText.
+function wrapLines(
   ctx: CanvasRenderingContext2D,
   text: string,
-  x: number,
-  y: number,
   maxWidth: number,
-  lineHeight: number,
-  maxLines: number,
-  align: CanvasTextAlign
-): number {
-  ctx.textAlign = align;
+  maxLines: number
+): string[] {
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let line = "";
@@ -160,32 +289,53 @@ function drawWrapped(
     }
   }
   if (line && lines.length < maxLines) lines.push(line);
-  // ellipsis if truncated
   if (lines.length === maxLines) {
     let last = lines[maxLines - 1];
     while (ctx.measureText(last + "…").width > maxWidth && last.length > 1) {
       last = last.slice(0, -1);
     }
-    // only add ellipsis if we actually dropped words
     const rejoined = lines.join(" ");
     if (rejoined.length < text.length) lines[maxLines - 1] = last.trimEnd() + "…";
   }
+  return lines;
+}
+
+// Wrap text within maxWidth, returns the y after the last line.
+function drawWrapped(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines: number,
+  align: CanvasTextAlign
+): number {
+  ctx.textAlign = align;
+  const lines = wrapLines(ctx, text, maxWidth, maxLines);
   lines.forEach((ln, i) => ctx.fillText(ln, x, y + i * lineHeight));
   return y + lines.length * lineHeight;
 }
 
-function formatBirthday(iso: string): string {
-  if (!iso) return "";
-  const parts = iso.split("-");
-  if (parts.length < 3) return iso;
-  const months = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-  ];
-  const m = Number(parts[1]) - 1;
-  const d = Number(parts[2]);
-  if (m < 0 || m > 11 || !d) return iso;
-  return `${months[m]} ${d}`;
+// Shrinks the display name from maxFont→minFont until it fits on one line;
+// falls back to a 2-line wrap at minFont if it still doesn't fit.
+function fitDisplayText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxFont: number,
+  minFont: number,
+  fontFamily: string,
+  weight: number
+): { fontSize: number; lines: string[] } {
+  for (let size = maxFont; size >= minFont; size -= 2) {
+    ctx.font = `${weight} ${size}px ${fontFamily}`;
+    if (ctx.measureText(text).width <= maxWidth) {
+      return { fontSize: size, lines: [text] };
+    }
+  }
+  ctx.font = `${weight} ${minFont}px ${fontFamily}`;
+  return { fontSize: minFont, lines: wrapLines(ctx, text, maxWidth, 2) };
 }
 
 function isSameOrigin(src: string): boolean {
@@ -232,7 +382,6 @@ async function loadImage(src: string): Promise<HTMLImageElement | null> {
       const dataUrl = await blobToDataUrl(await res.blob());
       return imgFromUrl(dataUrl);
     }
-    // eslint-disable-next-line no-console
     console.warn(
       `[BirthdayCard] image proxy returned ${res.status} for host "${
         (() => {
@@ -245,40 +394,11 @@ async function loadImage(src: string): Promise<HTMLImageElement | null> {
       }" — ${src}`
     );
   } catch (e) {
-    // eslint-disable-next-line no-console
     console.warn(`[BirthdayCard] image proxy fetch error for ${src}`, e);
   }
   // Last resort: display the photo even though export will be limited.
-  // eslint-disable-next-line no-console
   console.warn(`[BirthdayCard] falling back to direct (non-exportable) load: ${src}`);
   return imgFromUrl(src);
-}
-
-type DrawEnv = {
-  W: number;
-  H: number;
-  primary: string;
-  accent: string;
-  companyName: string;
-  message: string;
-  name: string;
-  dateLabel: string;
-  photo: HTMLImageElement | null;
-  logo: HTMLImageElement | null;
-};
-
-function drawLogoChip(
-  ctx: CanvasRenderingContext2D,
-  logo: HTMLImageElement | null,
-  x: number,
-  y: number,
-  maxH: number
-) {
-  if (!logo) return 0;
-  const scale = maxH / logo.height;
-  const w = logo.width * scale;
-  ctx.drawImage(logo, x, y, w, maxH);
-  return w;
 }
 
 function confetti(
@@ -315,255 +435,286 @@ function confetti(
   ctx.globalAlpha = 1;
 }
 
-// ── Template renderers ───────────────────────────────────────────────────
-function drawEIHG(ctx: CanvasRenderingContext2D, e: DrawEnv) {
-  const { W, H, primary, accent } = e;
-  const g = ctx.createLinearGradient(0, 0, W, H);
-  g.addColorStop(0, "#0a1628");
-  g.addColorStop(0.55, primary);
-  g.addColorStop(1, "#1b2a4a");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-  // gold top bar
-  ctx.fillStyle = accent;
-  ctx.fillRect(0, 0, W, 16);
-  confetti(ctx, W, 320, [accent, "#ffffff", hexToRgba(accent, 0.6)], 34);
-
-  // left photo
-  const cx = 380;
-  const cy = H / 2 + 20;
-  drawCircularImage(ctx, e.photo, e.name, cx, cy, 240, accent, 10, hexToRgba(accent, 0.9));
-
-  // right content
-  const rx = 720;
-  // logo + company
-  const logoW = drawLogoChip(ctx, e.logo, rx, 120, 66);
-  ctx.fillStyle = "#cbd5e1";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.font = "700 26px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(e.companyName, rx + (logoW ? logoW + 22 : 0), 153);
-
-  ctx.fillStyle = accent;
-  ctx.font = "900 30px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText("✦ HAPPY BIRTHDAY ✦", rx, 300);
-
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "900 78px 'Segoe UI', Arial, sans-serif";
-  drawWrapped(ctx, e.name, rx, 400, W - rx - 90, 82, 2, "left");
-
-  ctx.fillStyle = accent;
-  ctx.font = "800 30px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(`🎂  ${e.dateLabel}`, rx, 540);
-
-  ctx.fillStyle = "#e2e8f0";
-  ctx.font = "400 30px 'Segoe UI', Arial, sans-serif";
-  drawWrapped(ctx, e.message, rx, 620, W - rx - 90, 44, 5, "left");
-
-  // footer rule
-  ctx.strokeStyle = hexToRgba(accent, 0.6);
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(rx, H - 120);
-  ctx.lineTo(W - 90, H - 120);
-  ctx.stroke();
-  ctx.fillStyle = "#94a3b8";
-  ctx.font = "700 22px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(`With warm wishes — ${e.companyName}`, rx, H - 80);
-}
-
-function drawFestive(ctx: CanvasRenderingContext2D, e: DrawEnv) {
-  const { W, H, primary, accent } = e;
-  const g = ctx.createLinearGradient(0, 0, W, H);
-  g.addColorStop(0, "#7c3aed");
-  g.addColorStop(1, "#ec4899");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  // balloons
+// ── Decorations — tasteful, mostly top/edges, never over the photo/name ───
+function drawBalloonsDeco(ctx: CanvasRenderingContext2D, W: number, _H: number, colors: string[]) {
   const balloons = [
-    { x: 150, y: 210, c: "#fde047" },
-    { x: 300, y: 150, c: "#38bdf8" },
-    { x: W - 180, y: 200, c: "#4ade80" },
-    { x: W - 330, y: 140, c: "#fb7185" },
+    { x: W * 0.14, y: 60, s: 0.55 },
+    { x: W * 0.28, y: 8, s: 0.4 },
+    { x: W * 0.72, y: 18, s: 0.45 },
+    { x: W * 0.86, y: 68, s: 0.6 },
   ];
-  balloons.forEach((b) => {
-    ctx.fillStyle = b.c;
+  balloons.forEach((b, i) => {
+    const c = colors[i % colors.length];
+    const rx = 46 * b.s;
+    const ry = 58 * b.s;
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = c;
     ctx.beginPath();
-    ctx.ellipse(b.x, b.y, 46, 58, 0, 0, Math.PI * 2);
+    ctx.ellipse(b.x, b.y, rx, ry, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = hexToRgba("#ffffff", 0.5);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = hexToRgba(c, 0.4);
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(b.x, b.y + 58);
-    ctx.quadraticCurveTo(b.x + 20, b.y + 130, b.x, b.y + 200);
+    ctx.moveTo(b.x, b.y + ry);
+    ctx.quadraticCurveTo(b.x + 14, b.y + ry + 70, b.x, b.y + ry + 140);
     ctx.stroke();
   });
-  confetti(ctx, W, H, ["#fde047", "#38bdf8", "#4ade80", "#fb7185", "#ffffff"], 46, 11);
+}
 
-  // white panel
-  const pad = 90;
+function drawSparkleDeco(ctx: CanvasRenderingContext2D, W: number, H: number, colors: string[]) {
+  let s = 21;
+  const rnd = () => {
+    s = (s * 9301 + 49297) % 233280;
+    return s / 233280;
+  };
+  const drawStar = (x: number, y: number, r: number, color: string) => {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.75;
+    ctx.beginPath();
+    ctx.moveTo(0, -r);
+    ctx.lineTo(r * 0.25, -r * 0.25);
+    ctx.lineTo(r, 0);
+    ctx.lineTo(r * 0.25, r * 0.25);
+    ctx.lineTo(0, r);
+    ctx.lineTo(-r * 0.25, r * 0.25);
+    ctx.lineTo(-r, 0);
+    ctx.lineTo(-r * 0.25, -r * 0.25);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  };
+  for (let i = 0; i < 24; i++) {
+    const topBand = rnd() < 0.55;
+    let x: number, y: number;
+    if (topBand) {
+      x = rnd() * W;
+      y = rnd() * 210;
+    } else {
+      x = rnd() < 0.5 ? rnd() * 110 : W - rnd() * 110;
+      y = 210 + rnd() * (H - 420);
+    }
+    drawStar(x, y, 6 + rnd() * 9, colors[Math.floor(rnd() * colors.length)]);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawFlower(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, petal: string, center: string) {
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.25)";
-  ctx.shadowBlur = 40;
-  ctx.fillStyle = "#ffffff";
-  roundRect(ctx, pad, pad, W - pad * 2, H - pad * 2, 28);
+  ctx.translate(cx, cy);
+  for (let i = 0; i < 5; i++) {
+    ctx.rotate((Math.PI * 2) / 5);
+    ctx.beginPath();
+    ctx.fillStyle = petal;
+    ctx.globalAlpha = 0.85;
+    ctx.ellipse(0, -r * 0.6, r * 0.42, r * 0.62, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.beginPath();
+  ctx.fillStyle = center;
+  ctx.arc(0, 0, r * 0.22, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
-
-  const cx = 360;
-  const cy = H / 2 + 10;
-  drawCircularImage(ctx, e.photo, e.name, cx, cy, 210, accent, 10, primary);
-
-  const rx = 640;
-  drawLogoChip(ctx, e.logo, rx, 165, 56);
-  ctx.fillStyle = "#7c3aed";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.font = "900 56px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText("Happy Birthday!", rx, 330);
-
-  ctx.fillStyle = primary;
-  ctx.font = "900 68px 'Segoe UI', Arial, sans-serif";
-  drawWrapped(ctx, e.name, rx, 420, W - rx - pad - 30, 74, 2, "left");
-
-  ctx.fillStyle = "#ec4899";
-  ctx.font = "800 30px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(`🎂  ${e.dateLabel}`, rx, 545);
-
-  ctx.fillStyle = "#475569";
-  ctx.font = "400 29px 'Segoe UI', Arial, sans-serif";
-  drawWrapped(ctx, e.message, rx, 620, W - rx - pad - 30, 42, 4, "left");
-
-  ctx.fillStyle = "#94a3b8";
-  ctx.font = "700 22px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(e.companyName, rx, H - 140);
 }
 
-function drawMinimal(ctx: CanvasRenderingContext2D, e: DrawEnv) {
-  const { W, H, primary, accent } = e;
-  ctx.fillStyle = "#faf7f2";
-  ctx.fillRect(0, 0, W, H);
-  // frame
-  ctx.strokeStyle = primary;
-  ctx.lineWidth = 3;
-  ctx.strokeRect(46, 46, W - 92, H - 92);
-  ctx.strokeStyle = accent;
+function drawFloralDeco(ctx: CanvasRenderingContext2D, W: number, _H: number, colors: string[]) {
+  const center = colors[3] || "#ffffff";
+  drawFlower(ctx, 128, 118, 58, colors[0], center);
+  drawFlower(ctx, W - 148, 88, 44, colors[1] || colors[0], center);
+  drawFlower(ctx, W - 86, 198, 32, colors[2] || colors[0], center);
+  drawFlower(ctx, 58, 226, 28, colors[1] || colors[0], center);
+}
+
+function drawCornersDeco(ctx: CanvasRenderingContext2D, W: number, H: number, colors: string[]) {
+  const inset = 44;
+  ctx.strokeStyle = hexToRgba(colors[0], 0.5);
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(60, 60, W - 120, H - 120);
-
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  // logo + company centered top
-  if (e.logo) {
-    const maxH = 58;
-    const scale = maxH / e.logo.height;
-    const w = e.logo.width * scale;
-    ctx.drawImage(e.logo, W / 2 - w / 2, 100, w, maxH);
-  }
-  ctx.fillStyle = primary;
-  ctx.font = "700 24px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(e.companyName.toUpperCase(), W / 2, e.logo ? 200 : 130);
-
-  // photo centered
-  drawCircularImage(ctx, e.photo, e.name, W / 2, 430, 165, accent, 6, primary);
-
-  ctx.fillStyle = accent;
-  ctx.font = "800 30px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText("HAPPY BIRTHDAY", W / 2, 660);
-
-  ctx.fillStyle = primary;
-  ctx.font = "900 66px 'Georgia', 'Segoe UI', serif";
-  drawWrapped(ctx, e.name, W / 2, 730, W - 260, 70, 1, "center");
-
-  ctx.fillStyle = "#64748b";
-  ctx.font = "600 28px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(`🎂  ${e.dateLabel}`, W / 2, 812);
-
-  // small accent rule
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(W / 2 - 40, 858);
-  ctx.lineTo(W / 2 + 40, 858);
-  ctx.stroke();
-
-  ctx.fillStyle = "#475569";
-  ctx.font = "400 28px 'Segoe UI', Arial, sans-serif";
-  drawWrapped(ctx, e.message, W / 2, 910, W - 380, 40, 3, "center");
-}
-
-function drawLuxe(ctx: CanvasRenderingContext2D, e: DrawEnv) {
-  const { W, H, accent } = e;
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, "#1a1a14");
-  g.addColorStop(1, "#0e0e0a");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  // gold frame
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(50, 50, W - 100, H - 100);
-  // corner flourishes
-  const corner = (cx: number, cy: number, dirX: number, dirY: number) => {
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 3;
+  ctx.strokeRect(inset, inset, W - inset * 2, H - inset * 2);
+  ctx.strokeStyle = hexToRgba(colors[1] || colors[0], 0.32);
+  ctx.strokeRect(inset + 10, inset + 10, W - (inset + 10) * 2, H - (inset + 10) * 2);
+  const cl = 46;
+  ctx.strokeStyle = colors[0];
+  ctx.lineWidth = 3;
+  const corner = (x: number, y: number, dx: number, dy: number) => {
     ctx.beginPath();
-    ctx.arc(cx + 70 * dirX, cy + 70 * dirY, 70, 0, Math.PI * 2);
-    ctx.globalAlpha = 0.35;
+    ctx.moveTo(x, y + cl * dy);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x + cl * dx, y);
     ctx.stroke();
-    ctx.globalAlpha = 1;
   };
-  corner(70, 70, 1, 1);
-  corner(W - 70, 70, -1, 1);
-  corner(70, H - 70, 1, -1);
-  corner(W - 70, H - 70, -1, -1);
+  corner(inset, inset, 1, 1);
+  corner(W - inset, inset, -1, 1);
+  corner(inset, H - inset, 1, -1);
+  corner(W - inset, H - inset, -1, -1);
+}
+
+function paintDecoration(ctx: CanvasRenderingContext2D, tpl: CardTemplate, W: number, H: number) {
+  switch (tpl.deco) {
+    case "balloons":
+      drawBalloonsDeco(ctx, W, H, tpl.decoColors);
+      break;
+    case "confetti":
+      confetti(ctx, W, 260, tpl.decoColors, 40, 17);
+      break;
+    case "sparkle":
+      drawSparkleDeco(ctx, W, H, tpl.decoColors);
+      break;
+    case "floral":
+      drawFloralDeco(ctx, W, H, tpl.decoColors);
+      break;
+    case "corners":
+      drawCornersDeco(ctx, W, H, tpl.decoColors);
+      break;
+    default:
+      break;
+  }
+}
+
+function paintBackground(ctx: CanvasRenderingContext2D, W: number, H: number, tpl: CardTemplate) {
+  const grad = tpl.bgDiagonal
+    ? ctx.createLinearGradient(0, 0, W, H)
+    : ctx.createLinearGradient(0, 0, 0, H);
+  const denom = Math.max(tpl.bg.length - 1, 1);
+  tpl.bg.forEach((c, i) => grad.addColorStop(i / denom, c));
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function paintPanel(ctx: CanvasRenderingContext2D, W: number, H: number, color: string) {
+  const pad = 66;
+  ctx.save();
+  ctx.shadowColor = "rgba(15,23,42,0.16)";
+  ctx.shadowBlur = 46;
+  ctx.shadowOffsetY = 16;
+  ctx.fillStyle = color;
+  roundRect(ctx, pad, pad, W - pad * 2, H - pad * 2, 36);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ── Birthday date/day/title computation ───────────────────────────────────
+const MONTHS = [
+  "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE",
+  "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
+];
+const WEEKDAYS = [
+  "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+];
+
+function computeBirthdayFields(iso: string, name: string): {
+  dateLabel: string;
+  dayLabel: string;
+  titleLabel: string;
+} {
+  const trimmedName = (name || "").trim();
+  const upper = trimmedName.toUpperCase();
+  const possessive = upper ? (upper.endsWith("S") ? `${upper}'` : `${upper}'S`) : "";
+  const titleLabel = possessive ? `${possessive} BIRTHDAY` : "BIRTHDAY";
+
+  const parts = (iso || "").split("-");
+  if (parts.length < 3) return { dateLabel: "", dayLabel: "", titleLabel };
+  const month = Number(parts[1]) - 1;
+  const day = Number(parts[2]);
+  if (!Number.isFinite(month) || month < 0 || month > 11 || !Number.isFinite(day) || day < 1 || day > 31) {
+    return { dateLabel: "", dayLabel: "", titleLabel };
+  }
+  const year = new Date().getFullYear();
+  const d = new Date(year, month, day);
+  const dateLabel = `${String(day).padStart(2, "0")} ${MONTHS[month]} ${year}`;
+  const dayLabel = WEEKDAYS[d.getDay()];
+  return { dateLabel, dayLabel, titleLabel };
+}
+
+// ── The generic card renderer — one function paints all 10 templates ──────
+type DrawEnv = {
+  W: number;
+  H: number;
+  name: string;
+  dateLabel: string;
+  dayLabel: string;
+  titleLabel: string;
+  fromText: string;
+  photo: HTMLImageElement | null;
+};
+
+function renderCard(ctx: CanvasRenderingContext2D, tpl: CardTemplate, env: DrawEnv) {
+  const { W, H } = env;
+  ctx.clearRect(0, 0, W, H);
+  paintBackground(ctx, W, H, tpl);
+  if (tpl.panel) paintPanel(ctx, W, H, tpl.panelColor || "#ffffff");
+  paintDecoration(ctx, tpl, W, H);
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  if (e.logo) {
-    const maxH = 56;
-    const scale = maxH / e.logo.height;
-    const w = e.logo.width * scale;
-    ctx.globalAlpha = 0.95;
-    ctx.drawImage(e.logo, W / 2 - w / 2, 110, w, maxH);
+  const cx = W / 2;
+  const contentMaxWidth = W - 260;
+
+  let cursor = 170;
+
+  // 1) Date — "07 JULY 2026"
+  if (env.dateLabel) {
+    ctx.fillStyle = tpl.sub;
+    ctx.font = `700 28px ${UTILITY_FONT}`;
+    setLetterSpacing(ctx, "3px");
+    ctx.fillText(env.dateLabel, cx, cursor);
+    setLetterSpacing(ctx, "0px");
+  }
+  cursor += 48;
+
+  // 2) Day — "Tuesday"
+  if (env.dayLabel) {
+    ctx.globalAlpha = 0.82;
+    ctx.fillStyle = tpl.sub;
+    ctx.font = `600 26px ${UTILITY_FONT}`;
+    ctx.fillText(env.dayLabel, cx, cursor);
     ctx.globalAlpha = 1;
   }
+  cursor += 70;
 
-  drawCircularImage(ctx, e.photo, e.name, W / 2, 420, 168, accent, 5, "#2a2a1e");
+  // 3) Birthday title — "NAME'S BIRTHDAY"
+  ctx.fillStyle = tpl.accent;
+  ctx.font = `800 34px ${UTILITY_FONT}`;
+  setLetterSpacing(ctx, "2px");
+  const titleEnd = drawWrapped(ctx, env.titleLabel, cx, cursor, contentMaxWidth, 44, 2, "center");
+  setLetterSpacing(ctx, "0px");
+  cursor = titleEnd + 66;
 
-  ctx.fillStyle = accent;
-  ctx.font = "900 34px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText("✦  HAPPY BIRTHDAY  ✦", W / 2, 650);
+  // 4) Employee photo — circular, ringed
+  const radius = 226;
+  const ringW = 14;
+  const photoCenterY = cursor + radius + ringW;
+  drawCircularImage(ctx, env.photo, env.name, cx, photoCenterY, radius, tpl.ring, ringW, tpl.fallback);
+  cursor = photoCenterY + radius + ringW + 66;
 
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "900 66px 'Georgia', 'Segoe UI', serif";
-  drawWrapped(ctx, e.name, W / 2, 726, W - 240, 70, 1, "center");
+  // 5) Large employee name
+  const nameFontFamily = tpl.serif ? SERIF_FONT : UTILITY_FONT;
+  const nameWeight = tpl.serif ? 700 : 900;
+  const { fontSize, lines } = fitDisplayText(ctx, env.name, contentMaxWidth, 96, 56, nameFontFamily, nameWeight);
+  ctx.fillStyle = tpl.ink;
+  ctx.font = `${nameWeight} ${fontSize}px ${nameFontFamily}`;
+  const nameLineHeight = fontSize * 1.15;
+  lines.forEach((ln, i) => ctx.fillText(ln, cx, cursor + i * nameLineHeight));
+  cursor += lines.length * nameLineHeight + 56;
 
-  ctx.fillStyle = accent;
-  ctx.font = "700 28px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(`🎂  ${e.dateLabel}`, W / 2, 806);
+  // 6) "Happy Birthday" signature — always present, hand-script
+  ctx.fillStyle = tpl.accent;
+  ctx.font = `400 80px ${SCRIPT_FONT}`;
+  ctx.fillText("Happy Birthday", cx, cursor);
 
-  ctx.fillStyle = "#d6d3c4";
-  ctx.font = "400 28px 'Segoe UI', Arial, sans-serif";
-  drawWrapped(ctx, e.message, W / 2, 858, W - 360, 40, 3, "center");
-
-  ctx.fillStyle = hexToRgba(accent, 0.8);
-  ctx.font = "700 22px 'Segoe UI', Arial, sans-serif";
-  ctx.fillText(e.companyName, W / 2, H - 95);
-}
-
-function renderTemplate(
-  ctx: CanvasRenderingContext2D,
-  template: CardTemplateId,
-  env: DrawEnv
-) {
-  ctx.clearRect(0, 0, env.W, env.H);
-  if (template === "festive") drawFestive(ctx, env);
-  else if (template === "minimal") drawMinimal(ctx, env);
-  else if (template === "luxe") drawLuxe(ctx, env);
-  else drawEIHG(ctx, env);
+  // 7) From block, bottom-anchored
+  const fromLabelY = H - 150;
+  const fromTextY = fromLabelY + 42;
+  ctx.fillStyle = tpl.sub;
+  ctx.font = `700 20px ${UTILITY_FONT}`;
+  setLetterSpacing(ctx, "2px");
+  ctx.fillText("FROM:", cx, fromLabelY);
+  setLetterSpacing(ctx, "0px");
+  ctx.fillStyle = tpl.ink;
+  ctx.font = `800 23px ${UTILITY_FONT}`;
+  drawWrapped(ctx, (env.fromText || "").toUpperCase(), cx, fromTextY, contentMaxWidth, 30, 2, "center");
 }
 
 // ── Reusable UI pieces (theme-aware, layout via Tailwind) ────────────────
@@ -583,10 +734,7 @@ function Section({
   return (
     <section className="space-y-2.5">
       <div className="flex items-baseline justify-between gap-2">
-        <h3
-          className="text-[13px] font-bold"
-          style={{ color: theme.title }}
-        >
+        <h3 className="text-[13px] font-bold" style={{ color: theme.title }}>
           {label}
         </h3>
         {hint ? <span className="text-[11px]">{hint}</span> : null}
@@ -623,6 +771,73 @@ function ActionTile({
   );
 }
 
+function SwitchToggle({
+  checked,
+  onChange,
+  label,
+  theme,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  theme: Palette;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className="flex w-full items-center justify-between rounded-xl px-3 py-2.5 transition-colors"
+      style={{ border: `1px solid ${theme.cardBorder}`, background: theme.inputBg }}
+    >
+      <span className="text-[12.5px] font-bold" style={{ color: theme.title }}>
+        {label}
+      </span>
+      <span
+        className="relative inline-block shrink-0 rounded-full transition-colors"
+        style={{ width: 38, height: 22, background: checked ? "#6366f1" : theme.cardBorder }}
+      >
+        <span
+          className="absolute top-[2px] rounded-full bg-white transition-all"
+          style={{ width: 18, height: 18, left: checked ? 18 : 2 }}
+        />
+      </span>
+    </button>
+  );
+}
+
+function GenderToggle({
+  value,
+  onChange,
+  theme,
+}: {
+  value: "male" | "female";
+  onChange: (g: "male" | "female") => void;
+  theme: Palette;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2.5">
+      {(["male", "female"] as const).map((g) => {
+        const active = value === g;
+        return (
+          <button
+            key={g}
+            type="button"
+            onClick={() => onChange(g)}
+            className="rounded-xl py-2.5 text-[13px] font-bold transition-colors"
+            style={{
+              border: `1.5px solid ${active ? "#6366f1" : theme.cardBorder}`,
+              background: active ? "rgba(99,102,241,0.10)" : theme.inputBg,
+              color: active ? "#6366f1" : theme.title,
+            }}
+          >
+            {g === "male" ? "♂ Male" : "♀ Female"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Preview + actions modal ──────────────────────────────────────────────
 export function BirthdayCardModal({
   person,
@@ -637,38 +852,85 @@ export function BirthdayCardModal({
 }) {
   const theme = getThemePalette();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [template, setTemplate] = useState<CardTemplateId>(
-    settings.defaultTemplate
+
+  const [gender, setGender] = useState<"male" | "female">(person.gender ?? "male");
+
+  const [randomTemplateOn, setRandomTemplateOn] = useState(settings.randomTemplate ?? true);
+  const [template, setTemplate] = useState<CardTemplateId>(() => {
+    const g = person.gender ?? "male";
+    return (settings.randomTemplate ?? true)
+      ? pickRandomTemplateId(g)
+      : normalizeTemplate(settings.defaultTemplate, g);
+  });
+
+  const didMountGenderEffect = useRef(false);
+  useEffect(() => {
+    if (!didMountGenderEffect.current) {
+      didMountGenderEffect.current = true;
+      return;
+    }
+    setTemplate((prev) => {
+      if (randomTemplateOn) return pickRandomTemplateId(gender);
+      const stillValid = TEMPLATES.some((t) => t.id === prev && t.gender === gender);
+      return stillValid ? prev : normalizeTemplate(settings.defaultTemplate, gender);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gender]);
+
+  const toggleRandomTemplate = (next: boolean) => {
+    setRandomTemplateOn(next);
+    if (next) setTemplate(pickRandomTemplateId(gender));
+  };
+
+  const genderTemplates = useMemo(() => TEMPLATES.filter((t) => t.gender === gender), [gender]);
+  const currentTemplate = useMemo(() => getTemplate(template), [template]);
+
+  const greetingsList = useMemo(
+    () => (settings.greetings && settings.greetings.length ? settings.greetings : DEFAULT_GREETINGS),
+    [settings.greetings]
   );
-  const [message, setMessage] = useState(settings.defaultMessage);
+  const pickRandomGreeting = () =>
+    greetingsList[Math.floor(Math.random() * greetingsList.length)] ?? DEFAULT_GREETINGS[0];
+
+  const [randomGreetingOn, setRandomGreetingOn] = useState(settings.randomGreeting ?? true);
+  const [greeting, setGreeting] = useState<string>(() =>
+    (settings.randomGreeting ?? true)
+      ? pickRandomGreeting()
+      : settings.defaultGreeting || greetingsList[0] || DEFAULT_GREETINGS[0]
+  );
+
+  const toggleRandomGreeting = (next: boolean) => {
+    setRandomGreetingOn(next);
+    if (next) setGreeting(pickRandomGreeting());
+  };
+
   const [busy, setBusy] = useState<string | null>(null);
-  const [assets, setAssets] = useState<{
-    photo: HTMLImageElement | null;
-    logo: HTMLImageElement | null;
-    ready: boolean;
-  }>({ photo: null, logo: null, ready: false });
+  const [assets, setAssets] = useState<{ photo: HTMLImageElement | null; ready: boolean }>({
+    photo: null,
+    ready: false,
+  });
 
   // The card is emailed to the HR team (an internal notification), so default
   // the recipient to the configured HR address — not the employee.
   const [recipient, setRecipient] = useState(settings.hrEmail || "");
   useEffect(() => setRecipient(settings.hrEmail || ""), [settings.hrEmail]);
 
-  // Load photo + logo once.
+  // Load the employee photo once.
   useEffect(() => {
     let alive = true;
     (async () => {
-      const [photo, logo] = await Promise.all([
-        loadImage(person.photoUrl || ""),
-        loadImage(settings.logoDataUrl || "/eihg-logo.jpeg"),
-      ]);
-      if (alive) setAssets({ photo, logo, ready: true });
+      const photo = await loadImage(person.photoUrl || "");
+      if (alive) setAssets({ photo, ready: true });
     })();
     return () => {
       alive = false;
     };
-  }, [person.photoUrl, settings.logoDataUrl]);
+  }, [person.photoUrl]);
 
-  const dateLabel = useMemo(() => formatBirthday(person.birthday), [person.birthday]);
+  const fields = useMemo(
+    () => computeBirthdayFields(person.birthday, person.name),
+    [person.birthday, person.name]
+  );
 
   // Re-render whenever inputs change.
   useEffect(() => {
@@ -681,19 +943,17 @@ export function BirthdayCardModal({
     ctx.setTransform(RENDER_SCALE, 0, 0, RENDER_SCALE, 0, 0);
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    renderTemplate(ctx, template, {
+    renderCard(ctx, getTemplate(template), {
       W: CARD_W,
       H: CARD_H,
-      primary: settings.primaryColor || "#0f1c35",
-      accent: settings.accentColor || "#f0c040",
-      companyName: settings.companyName || "",
-      message,
       name: person.name,
-      dateLabel,
+      dateLabel: fields.dateLabel,
+      dayLabel: fields.dayLabel,
+      titleLabel: fields.titleLabel,
+      fromText: settings.fromText || DEFAULT_BIRTHDAY_CARD_SETTINGS.fromText,
       photo: assets.photo,
-      logo: assets.logo,
     });
-  }, [template, message, assets, settings, person.name, dateLabel]);
+  }, [template, assets, fields, settings.fromText, person.name]);
 
   const safeName = person.name.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "");
 
@@ -712,19 +972,16 @@ export function BirthdayCardModal({
     }
   };
 
-  const toBlob = useCallback(
-    () =>
-      new Promise<Blob | null>((resolve) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return resolve(null);
-        try {
-          canvas.toBlob((b) => resolve(b), "image/png", 0.95);
-        } catch {
-          resolve(null); // tainted canvas
-        }
-      }),
-    []
-  );
+  const toBlob = () =>
+    new Promise<Blob | null>((resolve) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return resolve(null);
+      try {
+        canvas.toBlob((b) => resolve(b), "image/png", 0.95);
+      } catch {
+        resolve(null); // tainted canvas
+      }
+    });
 
   const downloadPng = async () => {
     const blob = await toBlob();
@@ -743,16 +1000,16 @@ export function BirthdayCardModal({
     if (!canvas) return;
     const dataUrl = getDataUrl();
     if (!dataUrl) return showToast("error", TAINT_MSG);
-    const w = window.open("", "_blank", "width=1100,height=800");
+    const w = window.open("", "_blank", "width=820,height=1040");
     if (!w) return showToast("error", "Please allow popups to save the PDF.");
     w.document.open();
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"/>
 <title>Birthday Card — ${person.name}</title>
 <style>
-  @page { size: A4 landscape; margin: 0; }
+  @page { size: A4 portrait; margin: 0; }
   html,body{margin:0;padding:0;background:#fff;}
   .wrap{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;}
-  img{width:100%;height:auto;max-height:100vh;display:block;}
+  img{width:auto;height:100%;max-width:100vw;display:block;}
   @media print{ .bar{display:none!important;} }
   .bar{position:fixed;top:0;left:0;right:0;display:flex;gap:10px;justify-content:center;padding:12px;background:#0f1c35;}
   .bar button{border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;}
@@ -779,7 +1036,7 @@ export function BirthdayCardModal({
         await nav.share({
           files: [file],
           title: `Happy Birthday ${person.name}!`,
-          text: message,
+          text: greeting,
         });
       } catch {
         /* user cancelled */
@@ -800,7 +1057,6 @@ export function BirthdayCardModal({
     const jpegDataUrl = getDataUrl("image/jpeg", 0.9);
     if (!jpegDataUrl) return showToast("error", TAINT_MSG);
     const base64 = jpegDataUrl.split(",")[1] || "";
-    // eslint-disable-next-line no-console
     console.log(
       `[BirthdayCard] emailing to ${recipient.trim()} — attachment ~${Math.round(
         (base64.length * 3) / 4 / 1024
@@ -815,9 +1071,10 @@ export function BirthdayCardModal({
         body: JSON.stringify({
           to: recipient.trim(),
           name: person.name,
-          birthday: dateLabel,
+          birthday: fields.dateLabel || person.birthday,
           imageBase64: base64,
           mimeType: "image/jpeg",
+          greeting,
         }),
       });
 
@@ -836,7 +1093,6 @@ export function BirthdayCardModal({
           [data.error, data.detail].filter(Boolean).join(" — ") ||
           raw ||
           `HTTP ${res.status}`;
-        // eslint-disable-next-line no-console
         console.error("[BirthdayCard] email failed", {
           status: res.status,
           error: data.error,
@@ -852,7 +1108,6 @@ export function BirthdayCardModal({
       showToast("success", `Birthday card sent to HR (${recipient.trim()}).`);
       return;
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error("[BirthdayCard] sendEmail error", e);
       showToast(
         "error",
@@ -879,7 +1134,7 @@ export function BirthdayCardModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative grid w-full max-w-7xl grid-cols-1 overflow-y-auto rounded-2xl lg:h-[94vh] lg:grid-cols-[minmax(0,1.55fr)_minmax(380px,1fr)] lg:overflow-hidden"
+        className="relative grid w-full max-w-7xl grid-cols-1 overflow-y-auto rounded-2xl lg:h-[94vh] lg:grid-cols-[minmax(0,1.2fr)_minmax(380px,1fr)] lg:overflow-hidden"
         style={{
           maxHeight: "94vh",
           background: theme.cardBackground,
@@ -909,10 +1164,11 @@ export function BirthdayCardModal({
               "radial-gradient(120% 120% at 50% 0%, #16213c 0%, #0b1220 70%)",
           }}
         >
-          <div className="w-full max-w-[860px]">
+          <div className="flex flex-col items-center">
             <div
               className="overflow-hidden rounded-xl"
               style={{
+                height: "min(72vh, 900px)",
                 aspectRatio: `${CARD_W} / ${CARD_H}`,
                 boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
                 border: "1px solid rgba(255,255,255,0.08)",
@@ -927,7 +1183,7 @@ export function BirthdayCardModal({
               />
             </div>
             <p className="mt-3 text-center text-[11px] font-medium tracking-wide text-slate-400">
-              Live preview · A4 landscape · {person.name}
+              Live preview · Portrait card · {person.name}
             </p>
           </div>
         </div>
@@ -960,49 +1216,142 @@ export function BirthdayCardModal({
 
           {/* Scrollable settings */}
           <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5 sm:px-7">
+            <Section
+              label="Recipient's gender"
+              theme={theme}
+              hint={<span style={{ color: theme.subtleText }}>Filters templates</span>}
+            >
+              <GenderToggle value={gender} onChange={setGender} theme={theme} />
+            </Section>
+
             <Section label="Template" theme={theme}>
-              <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-2">
-                {TEMPLATES.map((t) => {
-                  const active = t.id === template;
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => setTemplate(t.id)}
-                      className="flex flex-col gap-0.5 rounded-xl px-3 py-2.5 text-left transition-colors"
-                      style={{
-                        border: `1.5px solid ${active ? "#6366f1" : theme.cardBorder}`,
-                        background: active
-                          ? "rgba(99,102,241,0.10)"
-                          : theme.inputBg,
-                        color: active ? "#6366f1" : theme.title,
-                      }}
-                    >
-                      <span className="text-[13px] font-bold">{t.name}</span>
+              <div className="space-y-2.5">
+                <SwitchToggle
+                  checked={randomTemplateOn}
+                  onChange={toggleRandomTemplate}
+                  label="Random template"
+                  theme={theme}
+                />
+                {randomTemplateOn ? (
+                  <div
+                    className="flex items-center justify-between gap-3 rounded-xl px-3 py-3"
+                    style={{ border: `1px solid ${theme.cardBorder}`, background: theme.inputBg }}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
                       <span
-                        className="text-[11px]"
-                        style={{ color: active ? "#6366f1" : theme.subtleText }}
+                        style={{
+                          width: 16,
+                          height: 16,
+                          borderRadius: "50%",
+                          background: currentTemplate.accent,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span
+                        className="truncate text-[13px] font-extrabold"
+                        style={{ color: theme.title }}
                       >
-                        {t.hint}
+                        {currentTemplate.name}
                       </span>
+                    </div>
+                    <button
+                      onClick={() => setTemplate(pickRandomTemplateId(gender))}
+                      style={smallButtonStyle()}
+                    >
+                      🎲 Reshuffle
                     </button>
-                  );
-                })}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {genderTemplates.map((t) => {
+                      const active = t.id === template;
+                      return (
+                        <button
+                          key={t.id}
+                          onClick={() => setTemplate(t.id)}
+                          className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-left transition-colors"
+                          style={{
+                            border: `1.5px solid ${active ? "#6366f1" : theme.cardBorder}`,
+                            background: active ? "rgba(99,102,241,0.10)" : theme.inputBg,
+                            color: active ? "#6366f1" : theme.title,
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 14,
+                              height: 14,
+                              borderRadius: "50%",
+                              background: t.accent,
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span className="text-[12.5px] font-bold">{t.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </Section>
 
-            <Section label="Greeting message" theme={theme}>
-              <textarea
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                rows={4}
-                className="w-full"
-                style={{
-                  ...inputStyle(),
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                  lineHeight: 1.55,
-                }}
-              />
+            <Section
+              label="Greeting"
+              theme={theme}
+              hint={
+                <span style={{ color: theme.subtleText }}>Included in the email, not on the card</span>
+              }
+            >
+              <div className="space-y-2.5">
+                <SwitchToggle
+                  checked={randomGreetingOn}
+                  onChange={toggleRandomGreeting}
+                  label="Random greeting"
+                  theme={theme}
+                />
+                {randomGreetingOn ? (
+                  <div
+                    className="flex items-start justify-between gap-3 rounded-xl px-3 py-3"
+                    style={{ border: `1px solid ${theme.cardBorder}`, background: theme.inputBg }}
+                  >
+                    <p className="text-[13px] leading-snug" style={{ color: theme.title }}>
+                      {greeting}
+                    </p>
+                    <button
+                      onClick={() => setGreeting(pickRandomGreeting())}
+                      style={smallButtonStyle()}
+                    >
+                      🎲
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <select
+                      value={greetingsList.includes(greeting) ? greeting : ""}
+                      onChange={(e) => e.target.value && setGreeting(e.target.value)}
+                      style={inputStyle()}
+                    >
+                      <option value="">Custom / choose a preset…</option>
+                      {greetingsList.map((g, i) => (
+                        <option key={i} value={g}>
+                          {g.length > 70 ? `${g.slice(0, 70)}…` : g}
+                        </option>
+                      ))}
+                    </select>
+                    <textarea
+                      value={greeting}
+                      onChange={(e) => setGreeting(e.target.value)}
+                      rows={3}
+                      className="w-full"
+                      style={{
+                        ...inputStyle(),
+                        resize: "vertical",
+                        fontFamily: "inherit",
+                        lineHeight: 1.5,
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
             </Section>
 
             <Section
@@ -1064,25 +1413,6 @@ export function BirthdayCardModal({
 }
 
 // ── Settings modal ───────────────────────────────────────────────────────
-async function fileToCompressedDataUrl(file: File, maxDim = 400): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  let { width, height } = bitmap;
-  if (width > maxDim || height > maxDim) {
-    const scale = Math.min(maxDim / width, maxDim / height);
-    width = Math.round(width * scale);
-    height = Math.round(height * scale);
-  }
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return "";
-  ctx.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close?.();
-  // PNG to preserve logo transparency.
-  return canvas.toDataURL("image/png");
-}
-
 export function BirthdayCardSettingsModal({
   settings,
   onSave,
@@ -1095,32 +1425,41 @@ export function BirthdayCardSettingsModal({
   showToast: (type: ToastType, message: string) => void;
 }) {
   const theme = getThemePalette();
-  const [form, setForm] = useState<BirthdayCardSettings>(settings);
+  const [form, setForm] = useState<BirthdayCardSettings>(() => ({
+    ...DEFAULT_BIRTHDAY_CARD_SETTINGS,
+    ...settings,
+    defaultTemplate: normalizeTemplate(settings.defaultTemplate, "male"),
+  }));
+  const [greetingsText, setGreetingsText] = useState(
+    (settings.greetings && settings.greetings.length ? settings.greetings : DEFAULT_GREETINGS).join("\n")
+  );
   const [saving, setSaving] = useState(false);
-  const logoInput = useRef<HTMLInputElement | null>(null);
 
   const set = <K extends keyof BirthdayCardSettings>(
     k: K,
     v: BirthdayCardSettings[K]
   ) => setForm((f) => ({ ...f, [k]: v }));
 
-  const onLogo = async (file: File | null) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      return showToast("error", "Please choose an image file.");
-    }
-    try {
-      const dataUrl = await fileToCompressedDataUrl(file);
-      set("logoDataUrl", dataUrl);
-    } catch {
-      showToast("error", "Could not read that image.");
-    }
-  };
+  const currentGreetingsList = useMemo(() => {
+    const list = greetingsText
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return list.length ? list : DEFAULT_GREETINGS;
+  }, [greetingsText]);
 
   const save = async () => {
+    const finalGreetings = currentGreetingsList;
+    const finalDefaultGreeting = finalGreetings.includes(form.defaultGreeting)
+      ? form.defaultGreeting
+      : finalGreetings[0];
     setSaving(true);
     try {
-      await onSave(form);
+      await onSave({
+        ...form,
+        greetings: finalGreetings,
+        defaultGreeting: finalDefaultGreeting,
+      });
       showToast("success", "Birthday-card settings saved.");
       onClose();
     } catch (e) {
@@ -1141,8 +1480,6 @@ export function BirthdayCardSettingsModal({
       {node}
     </div>
   );
-
-  const logoSrc = form.logoDataUrl || "/eihg-logo.jpeg";
 
   return (
     <div
@@ -1187,10 +1524,10 @@ export function BirthdayCardSettingsModal({
         </div>
 
         {field(
-          "Company name",
+          "From (shown on the card & email)",
           <input
-            value={form.companyName}
-            onChange={(e) => set("companyName", e.target.value)}
+            value={form.fromText}
+            onChange={(e) => set("fromText", e.target.value)}
             style={inputStyle()}
           />
         )}
@@ -1207,105 +1544,14 @@ export function BirthdayCardSettingsModal({
         )}
 
         {field(
-          "Company logo",
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div
-              style={{
-                width: 90,
-                height: 54,
-                borderRadius: 8,
-                border: `1px solid ${theme.cardBorder}`,
-                background: "#fff",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                overflow: "hidden",
-                flexShrink: 0,
-              }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={logoSrc}
-                alt="logo"
-                style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
-              />
-            </div>
-            <input
-              ref={logoInput}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                onLogo(e.target.files?.[0] ?? null);
-                e.target.value = "";
-              }}
-            />
-            <button
-              onClick={() => logoInput.current?.click()}
-              style={smallButtonStyle()}
-            >
-              Upload logo
-            </button>
-            {form.logoDataUrl && (
-              <button
-                onClick={() => set("logoDataUrl", "")}
-                style={{ ...smallButtonStyle(), color: "#ef4444" }}
-              >
-                Reset
-              </button>
-            )}
-          </div>
-        )}
-
-        {field(
-          "Default greeting message",
-          <textarea
-            value={form.defaultMessage}
-            onChange={(e) => set("defaultMessage", e.target.value)}
-            rows={3}
-            style={{
-              ...inputStyle(),
-              resize: "vertical",
-              fontFamily: "inherit",
-              lineHeight: 1.5,
-            }}
+          "Random template",
+          <SwitchToggle
+            checked={form.randomTemplate}
+            onChange={(v) => set("randomTemplate", v)}
+            label={form.randomTemplate ? "On — a random template is picked each time" : "Off — always use the default template"}
+            theme={theme}
           />
         )}
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          {field(
-            "Primary color",
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="color"
-                value={form.primaryColor}
-                onChange={(e) => set("primaryColor", e.target.value)}
-                style={{ width: 44, height: 38, borderRadius: 8, border: "none", background: "none", cursor: "pointer" }}
-              />
-              <input
-                value={form.primaryColor}
-                onChange={(e) => set("primaryColor", e.target.value)}
-                style={{ ...inputStyle(), fontFamily: "monospace" }}
-              />
-            </div>
-          )}
-          {field(
-            "Accent color",
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="color"
-                value={form.accentColor}
-                onChange={(e) => set("accentColor", e.target.value)}
-                style={{ width: 44, height: 38, borderRadius: 8, border: "none", background: "none", cursor: "pointer" }}
-              />
-              <input
-                value={form.accentColor}
-                onChange={(e) => set("accentColor", e.target.value)}
-                style={{ ...inputStyle(), fontFamily: "monospace" }}
-              />
-            </div>
-          )}
-        </div>
 
         {field(
           "Default template",
@@ -1314,12 +1560,61 @@ export function BirthdayCardSettingsModal({
             onChange={(e) => set("defaultTemplate", e.target.value as CardTemplateId)}
             style={inputStyle()}
           >
-            {TEMPLATES.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name} — {t.hint}
+            <optgroup label="Male">
+              {TEMPLATES.filter((t) => t.gender === "male").map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Female">
+              {TEMPLATES.filter((t) => t.gender === "female").map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </optgroup>
+          </select>
+        )}
+
+        {field(
+          "Random greeting",
+          <SwitchToggle
+            checked={form.randomGreeting}
+            onChange={(v) => set("randomGreeting", v)}
+            label={form.randomGreeting ? "On — a random greeting is picked each time" : "Off — always use the default greeting"}
+            theme={theme}
+          />
+        )}
+
+        {field(
+          "Default greeting",
+          <select
+            value={currentGreetingsList.includes(form.defaultGreeting) ? form.defaultGreeting : currentGreetingsList[0]}
+            onChange={(e) => set("defaultGreeting", e.target.value)}
+            style={inputStyle()}
+          >
+            {currentGreetingsList.map((g, i) => (
+              <option key={i} value={g}>
+                {g.length > 70 ? `${g.slice(0, 70)}…` : g}
               </option>
             ))}
           </select>
+        )}
+
+        {field(
+          "Greetings (one per line)",
+          <textarea
+            value={greetingsText}
+            onChange={(e) => setGreetingsText(e.target.value)}
+            rows={6}
+            style={{
+              ...inputStyle(),
+              resize: "vertical",
+              fontFamily: "inherit",
+              lineHeight: 1.5,
+            }}
+          />
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
