@@ -65,11 +65,11 @@ export const DEFAULT_BIRTHDAY_CARD_SETTINGS: BirthdayCardSettings = {
   randomGreeting: true,
 };
 
-// ── Portrait canvas dimensions ────────────────────────────────────────────
+// ── Landscape canvas dimensions (A4 landscape) ────────────────────────────
 // Logical drawing size; the backing canvas is rendered at RENDER_SCALE× this
 // for crisp photos and text in the exported PNG/PDF.
-const CARD_W = 1200;
-const CARD_H = 1600;
+const CARD_W = 1600;
+const CARD_H = 1131;
 const RENDER_SCALE = 2;
 
 // ── Type system (3 roles) ─────────────────────────────────────────────────
@@ -640,6 +640,11 @@ type DrawEnv = {
   photo: HTMLImageElement | null;
 };
 
+// Landscape composition: a large ringed photo anchors the left column, and
+// the full text stack (date → day → title → name → signature → from) is
+// centered in the right column. The whole text block is vertically centered
+// as a unit (two-pass: measure, then draw) so it fills the frame evenly
+// alongside the photo instead of leaving empty bands top/bottom.
 function renderCard(ctx: CanvasRenderingContext2D, tpl: CardTemplate, env: DrawEnv) {
   const { W, H } = env;
   ctx.clearRect(0, 0, W, H);
@@ -649,72 +654,114 @@ function renderCard(ctx: CanvasRenderingContext2D, tpl: CardTemplate, env: DrawE
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const cx = W / 2;
-  const contentMaxWidth = W - 260;
 
-  let cursor = 170;
+  // ── Left column — circular ringed photo ──
+  const photoRadius = 290;
+  const ringW = 16;
+  const photoCenterX = 110 + photoRadius + ringW;
+  const photoCenterY = H / 2;
+  drawCircularImage(ctx, env.photo, env.name, photoCenterX, photoCenterY, photoRadius, tpl.ring, ringW, tpl.fallback);
+
+  // ── Right column — text stack ──
+  const textLeft = photoCenterX + photoRadius + ringW + 70;
+  const textRight = W - 110;
+  const cx = (textLeft + textRight) / 2;
+  const maxW = Math.max(280, textRight - textLeft);
+
+  const dateH = 40;
+  const dayH = 52;
+
+  ctx.font = `800 30px ${UTILITY_FONT}`;
+  setLetterSpacing(ctx, "2px");
+  const titleLines = env.titleLabel ? wrapLines(ctx, env.titleLabel, maxW, 2) : [];
+  setLetterSpacing(ctx, "0px");
+  const titleLineHeight = 40;
+  const titleBlockH = titleLines.length * titleLineHeight;
+
+  const nameFontFamily = tpl.serif ? SERIF_FONT : UTILITY_FONT;
+  const nameWeight = tpl.serif ? 700 : 900;
+  const { fontSize: nameFontSize, lines: nameLines } = fitDisplayText(
+    ctx, env.name, maxW, 80, 48, nameFontFamily, nameWeight
+  );
+  const nameLineHeight = nameFontSize * 1.15;
+  const nameBlockH = nameLines.length * nameLineHeight;
+
+  const { fontSize: happyFontSize, lines: happyLines } = fitDisplayText(
+    ctx, "Happy Birthday", maxW, 78, 46, SCRIPT_FONT, 400
+  );
+  const happyLineHeight = happyFontSize * 1.08;
+  const happyBlockH = happyLines.length * happyLineHeight;
+
+  ctx.font = `800 21px ${UTILITY_FONT}`;
+  const fromLines = wrapLines(ctx, (env.fromText || "").toUpperCase(), maxW, 2);
+  const fromLineHeight = 27;
+  const fromBlockH = fromLines.length * fromLineHeight;
+  const fromLabelH = 24;
+
+  const gapAfterTitle = 46;
+  const gapAfterName = 42;
+  const gapAfterHappy = 40;
+  const gapBeforeFromText = 30;
+
+  const totalH =
+    dateH + dayH +
+    titleBlockH + gapAfterTitle +
+    nameBlockH + gapAfterName +
+    happyBlockH + gapAfterHappy +
+    fromLabelH + gapBeforeFromText + fromBlockH;
+
+  let cursor = Math.max(80, (H - totalH) / 2);
 
   // 1) Date — "07 JULY 2026"
   if (env.dateLabel) {
     ctx.fillStyle = tpl.sub;
-    ctx.font = `700 28px ${UTILITY_FONT}`;
+    ctx.font = `700 26px ${UTILITY_FONT}`;
     setLetterSpacing(ctx, "3px");
     ctx.fillText(env.dateLabel, cx, cursor);
     setLetterSpacing(ctx, "0px");
   }
-  cursor += 48;
+  cursor += dateH;
 
   // 2) Day — "Tuesday"
   if (env.dayLabel) {
     ctx.globalAlpha = 0.82;
     ctx.fillStyle = tpl.sub;
-    ctx.font = `600 26px ${UTILITY_FONT}`;
+    ctx.font = `600 23px ${UTILITY_FONT}`;
     ctx.fillText(env.dayLabel, cx, cursor);
     ctx.globalAlpha = 1;
   }
-  cursor += 70;
+  cursor += dayH;
 
   // 3) Birthday title — "NAME'S BIRTHDAY"
   ctx.fillStyle = tpl.accent;
-  ctx.font = `800 34px ${UTILITY_FONT}`;
+  ctx.font = `800 30px ${UTILITY_FONT}`;
   setLetterSpacing(ctx, "2px");
-  const titleEnd = drawWrapped(ctx, env.titleLabel, cx, cursor, contentMaxWidth, 44, 2, "center");
+  drawWrapped(ctx, env.titleLabel, cx, cursor, maxW, titleLineHeight, 2, "center");
   setLetterSpacing(ctx, "0px");
-  cursor = titleEnd + 66;
+  cursor += titleBlockH + gapAfterTitle;
 
-  // 4) Employee photo — circular, ringed
-  const radius = 226;
-  const ringW = 14;
-  const photoCenterY = cursor + radius + ringW;
-  drawCircularImage(ctx, env.photo, env.name, cx, photoCenterY, radius, tpl.ring, ringW, tpl.fallback);
-  cursor = photoCenterY + radius + ringW + 66;
-
-  // 5) Large employee name
-  const nameFontFamily = tpl.serif ? SERIF_FONT : UTILITY_FONT;
-  const nameWeight = tpl.serif ? 700 : 900;
-  const { fontSize, lines } = fitDisplayText(ctx, env.name, contentMaxWidth, 96, 56, nameFontFamily, nameWeight);
+  // 4) Large employee name
   ctx.fillStyle = tpl.ink;
-  ctx.font = `${nameWeight} ${fontSize}px ${nameFontFamily}`;
-  const nameLineHeight = fontSize * 1.15;
-  lines.forEach((ln, i) => ctx.fillText(ln, cx, cursor + i * nameLineHeight));
-  cursor += lines.length * nameLineHeight + 56;
+  ctx.font = `${nameWeight} ${nameFontSize}px ${nameFontFamily}`;
+  nameLines.forEach((ln, i) => ctx.fillText(ln, cx, cursor + i * nameLineHeight));
+  cursor += nameBlockH + gapAfterName;
 
-  // 6) "Happy Birthday" signature — always present, hand-script
+  // 5) "Happy Birthday" signature — always present, hand-script
   ctx.fillStyle = tpl.accent;
-  ctx.font = `400 80px ${SCRIPT_FONT}`;
-  ctx.fillText("Happy Birthday", cx, cursor);
+  ctx.font = `400 ${happyFontSize}px ${SCRIPT_FONT}`;
+  happyLines.forEach((ln, i) => ctx.fillText(ln, cx, cursor + i * happyLineHeight));
+  cursor += happyBlockH + gapAfterHappy;
 
-  // 7) From block, bottom-anchored
-  const fromLabelY = H - 150;
-  const fromTextY = fromLabelY + 42;
+  // 6) From block
   ctx.fillStyle = tpl.sub;
-  ctx.font = `700 20px ${UTILITY_FONT}`;
+  ctx.font = `700 18px ${UTILITY_FONT}`;
   setLetterSpacing(ctx, "2px");
-  ctx.fillText("FROM:", cx, fromLabelY);
+  ctx.fillText("FROM:", cx, cursor);
   setLetterSpacing(ctx, "0px");
+  cursor += gapBeforeFromText;
   ctx.fillStyle = tpl.ink;
-  ctx.font = `800 23px ${UTILITY_FONT}`;
-  drawWrapped(ctx, (env.fromText || "").toUpperCase(), cx, fromTextY, contentMaxWidth, 30, 2, "center");
+  ctx.font = `800 21px ${UTILITY_FONT}`;
+  drawWrapped(ctx, (env.fromText || "").toUpperCase(), cx, cursor, maxW, fromLineHeight, 2, "center");
 }
 
 // ── Reusable UI pieces (theme-aware, layout via Tailwind) ────────────────
@@ -1000,16 +1047,16 @@ export function BirthdayCardModal({
     if (!canvas) return;
     const dataUrl = getDataUrl();
     if (!dataUrl) return showToast("error", TAINT_MSG);
-    const w = window.open("", "_blank", "width=820,height=1040");
+    const w = window.open("", "_blank", "width=1100,height=800");
     if (!w) return showToast("error", "Please allow popups to save the PDF.");
     w.document.open();
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"/>
 <title>Birthday Card — ${person.name}</title>
 <style>
-  @page { size: A4 portrait; margin: 0; }
+  @page { size: A4 landscape; margin: 0; }
   html,body{margin:0;padding:0;background:#fff;}
   .wrap{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;}
-  img{width:auto;height:100%;max-width:100vw;display:block;}
+  img{width:100%;height:auto;max-height:100vh;display:block;}
   @media print{ .bar{display:none!important;} }
   .bar{position:fixed;top:0;left:0;right:0;display:flex;gap:10px;justify-content:center;padding:12px;background:#0f1c35;}
   .bar button{border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;}
@@ -1134,7 +1181,7 @@ export function BirthdayCardModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative grid w-full max-w-7xl grid-cols-1 overflow-y-auto rounded-2xl lg:h-[94vh] lg:grid-cols-[minmax(0,1.2fr)_minmax(380px,1fr)] lg:overflow-hidden"
+        className="relative grid w-full max-w-7xl grid-cols-1 overflow-y-auto rounded-2xl lg:h-[94vh] lg:grid-cols-[minmax(0,1.55fr)_minmax(380px,1fr)] lg:overflow-hidden"
         style={{
           maxHeight: "94vh",
           background: theme.cardBackground,
@@ -1164,11 +1211,10 @@ export function BirthdayCardModal({
               "radial-gradient(120% 120% at 50% 0%, #16213c 0%, #0b1220 70%)",
           }}
         >
-          <div className="flex flex-col items-center">
+          <div className="w-full max-w-[900px]">
             <div
               className="overflow-hidden rounded-xl"
               style={{
-                height: "min(72vh, 900px)",
                 aspectRatio: `${CARD_W} / ${CARD_H}`,
                 boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
                 border: "1px solid rgba(255,255,255,0.08)",
@@ -1183,7 +1229,7 @@ export function BirthdayCardModal({
               />
             </div>
             <p className="mt-3 text-center text-[11px] font-medium tracking-wide text-slate-400">
-              Live preview · Portrait card · {person.name}
+              Live preview · Landscape card · {person.name}
             </p>
           </div>
         </div>
