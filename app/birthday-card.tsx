@@ -591,31 +591,50 @@ type BalloonCluster = {
   sizeRange: [number, number];
 };
 
-// Clustered, premium balloon decoration for blue-balloons / pink-balloons.
-// Placement is seeded per template id (`seed`) so the two templates read as
-// related but distinct compositions, and `bottomCorner` picks which lower
-// corner gets the small accent cluster (left for blue, right for pink).
+// Even balloon "frame" around all four edges for blue-balloons / pink-
+// balloons: a small cluster in each corner, a couple along the top and
+// bottom edges between the corners, and a couple on each side margin at
+// mid-height — so the garland reads as a continuous, balanced frame rather
+// than a few clumps. Placement is seeded per template id (`seed`) so the two
+// templates stay related but visually distinct.
 function drawBalloonsDeco(
   ctx: CanvasRenderingContext2D,
   W: number,
   H: number,
   colors: string[],
-  seed: number,
-  bottomCorner: "left" | "right"
+  seed: number
 ) {
   const rnd = makeRnd(seed);
   const pick = () => colors[Math.floor(rnd() * colors.length)] || colors[0];
 
-  const gapCenterX = (720 + 790) / 2; // the seam between the photo and text columns
-
-  const clusters: BalloonCluster[] = [
-    { cx: 120, cy: 92, count: 4, spread: 70, sizeRange: [30, 50] }, // top-left
-    { cx: W - 120, cy: 92, count: 4, spread: 70, sizeRange: [30, 50] }, // top-right
-    { cx: gapCenterX, cy: 42, count: 2, spread: 50, sizeRange: [26, 38] }, // top-center
-    bottomCorner === "left"
-      ? { cx: 112, cy: H - 92, count: 3, spread: 55, sizeRange: [26, 42] }
-      : { cx: W - 112, cy: H - 92, count: 3, spread: 55, sizeRange: [26, 42] },
+  // Corner clusters — larger balloons, ~3 each.
+  const corners: BalloonCluster[] = [
+    { cx: 118, cy: 96, count: 3, spread: 62, sizeRange: [28, 46] }, // top-left
+    { cx: W - 118, cy: 96, count: 3, spread: 62, sizeRange: [28, 46] }, // top-right
+    { cx: 112, cy: H - 96, count: 3, spread: 58, sizeRange: [28, 46] }, // bottom-left
+    { cx: W - 112, cy: H - 96, count: 3, spread: 58, sizeRange: [28, 46] }, // bottom-right
   ];
+
+  // Top/bottom edge fillers between the corners — smaller, garland-style.
+  const topEdge: BalloonCluster[] = [
+    { cx: W * 0.36, cy: 44, count: 1, spread: 22, sizeRange: [24, 36] },
+    { cx: W * 0.64, cy: 40, count: 1, spread: 22, sizeRange: [24, 36] },
+  ];
+  const bottomEdge: BalloonCluster[] = [
+    { cx: W * 0.36, cy: H - 44, count: 1, spread: 22, sizeRange: [24, 36] },
+    { cx: W * 0.64, cy: H - 40, count: 1, spread: 22, sizeRange: [24, 36] },
+  ];
+
+  // Side margins at mid-height — smallest, just enough to close the frame.
+  // Kept strictly outside the photo (x<105) and text column (x>1495).
+  const sideMargins: BalloonCluster[] = [
+    { cx: 62, cy: H * 0.34, count: 1, spread: 14, sizeRange: [22, 32] },
+    { cx: 62, cy: H * 0.66, count: 1, spread: 14, sizeRange: [22, 32] },
+    { cx: W - 62, cy: H * 0.34, count: 1, spread: 14, sizeRange: [22, 32] },
+    { cx: W - 62, cy: H * 0.66, count: 1, spread: 14, sizeRange: [22, 32] },
+  ];
+
+  const clusters: BalloonCluster[] = [...corners, ...topEdge, ...bottomEdge, ...sideMargins];
 
   clusters.forEach((cl) => {
     for (let i = 0; i < cl.count; i++) {
@@ -627,12 +646,12 @@ function drawBalloonsDeco(
       const rx = size;
       const ry = size * 1.22;
       const tilt = (rnd() - 0.5) * 22;
-      const stringLen = 70 + rnd() * 60;
+      const stringLen = 60 + rnd() * 50;
       drawPremiumBalloon(ctx, x, y, rx, ry, pick(), tilt, stringLen);
     }
   });
 
-  drawEdgeConfettiBits(ctx, W, H, colors, seed, 26);
+  drawEdgeConfettiBits(ctx, W, H, colors, seed, 36);
 }
 
 function drawSparkleDeco(ctx: CanvasRenderingContext2D, W: number, H: number, colors: string[]) {
@@ -728,8 +747,7 @@ function paintDecoration(ctx: CanvasRenderingContext2D, tpl: CardTemplate, W: nu
   switch (tpl.deco) {
     case "balloons": {
       const seed = hashSeed(tpl.id);
-      const bottomCorner: "left" | "right" = tpl.id === "pink-balloons" ? "right" : "left";
-      drawBalloonsDeco(ctx, W, H, tpl.decoColors, seed, bottomCorner);
+      drawBalloonsDeco(ctx, W, H, tpl.decoColors, seed);
       break;
     }
     case "confetti":
