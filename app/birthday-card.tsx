@@ -436,30 +436,203 @@ function confetti(
 }
 
 // ── Decorations — tasteful, mostly top/edges, never over the photo/name ───
-function drawBalloonsDeco(ctx: CanvasRenderingContext2D, W: number, _H: number, colors: string[]) {
-  const balloons = [
-    { x: W * 0.14, y: 60, s: 0.55 },
-    { x: W * 0.28, y: 8, s: 0.4 },
-    { x: W * 0.72, y: 18, s: 0.45 },
-    { x: W * 0.86, y: 68, s: 0.6 },
+
+// Small seeded RNG (same LCG shape as `confetti`) so a template's decoration
+// arrangement is deterministic per template id, not re-randomized on every
+// render — used to give blue-balloons / pink-balloons distinct compositions.
+function makeRnd(seed: number): () => number {
+  let s = seed || 1;
+  return () => {
+    s = (s * 9301 + 49297) % 233280;
+    return s / 233280;
+  };
+}
+
+function hashSeed(id: string): number {
+  let h = 7;
+  for (let i = 0; i < id.length; i++) {
+    h = (h * 131 + id.charCodeAt(i)) % 999331;
+  }
+  return h || 13;
+}
+
+// One small 4-point star — standalone (not shared with drawSparkleDeco) so
+// the sparkle-template rendering path stays untouched.
+function drawTinyStar(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, -r);
+  ctx.lineTo(r * 0.28, -r * 0.28);
+  ctx.lineTo(r, 0);
+  ctx.lineTo(r * 0.28, r * 0.28);
+  ctx.lineTo(0, r);
+  ctx.lineTo(-r * 0.28, r * 0.28);
+  ctx.lineTo(-r, 0);
+  ctx.lineTo(-r * 0.28, -r * 0.28);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+// A single premium balloon: glossy body, soft highlight, knot, curved string.
+function drawPremiumBalloon(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  rx: number,
+  ry: number,
+  color: string,
+  tiltDeg: number,
+  stringLen: number
+) {
+  const rad = (tiltDeg * Math.PI) / 180;
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rad);
+
+  // body
+  ctx.globalAlpha = 0.95;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // soft glossy highlight, offset up-left
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.ellipse(-rx * 0.32, -ry * 0.36, rx * 0.26, ry * 0.34, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // knot
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(-rx * 0.1, ry * 0.96);
+  ctx.lineTo(rx * 0.1, ry * 0.96);
+  ctx.lineTo(0, ry * 1.16);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+
+  // curved string, anchored at the (rotated) knot point
+  const localKnotY = ry * 1.16;
+  const knotX = x - localKnotY * Math.sin(rad);
+  const knotY = y + localKnotY * Math.cos(rad);
+  const sway = tiltDeg >= 0 ? 12 : -12;
+
+  ctx.strokeStyle = hexToRgba(color, 0.4);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(knotX, knotY);
+  ctx.quadraticCurveTo(knotX + sway, knotY + stringLen * 0.6, knotX, knotY + stringLen);
+  ctx.stroke();
+}
+
+// Small dots / confetti strips / tiny stars, kept strictly inside the same
+// edge/corner bands as the balloon clusters (top <210px, bottom <210px from
+// the edge, or side margins <150px) so the center stays clear.
+function drawEdgeConfettiBits(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  colors: string[],
+  seed: number,
+  count: number
+) {
+  const rnd = makeRnd(seed + 4242);
+  for (let i = 0; i < count; i++) {
+    const band = rnd();
+    let x: number;
+    let y: number;
+    if (band < 0.4) {
+      x = rnd() * W;
+      y = rnd() * 190;
+    } else if (band < 0.6) {
+      x = rnd() * W;
+      y = H - rnd() * 190;
+    } else if (band < 0.8) {
+      x = rnd() * 140;
+      y = rnd() * H;
+    } else {
+      x = W - rnd() * 140;
+      y = rnd() * H;
+    }
+    const color = colors[Math.floor(rnd() * colors.length)] || colors[0];
+    const kind = rnd();
+    ctx.globalAlpha = 0.6 + rnd() * 0.25;
+    ctx.fillStyle = color;
+    if (kind < 0.4) {
+      ctx.beginPath();
+      ctx.arc(x, y, 3 + rnd() * 4, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (kind < 0.75) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rnd() * Math.PI);
+      ctx.fillRect(-7, -2.5, 14, 5);
+      ctx.restore();
+    } else {
+      drawTinyStar(ctx, x, y, 5 + rnd() * 5, color);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+type BalloonCluster = {
+  cx: number;
+  cy: number;
+  count: number;
+  spread: number;
+  sizeRange: [number, number];
+};
+
+// Clustered, premium balloon decoration for blue-balloons / pink-balloons.
+// Placement is seeded per template id (`seed`) so the two templates read as
+// related but distinct compositions, and `bottomCorner` picks which lower
+// corner gets the small accent cluster (left for blue, right for pink).
+function drawBalloonsDeco(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  colors: string[],
+  seed: number,
+  bottomCorner: "left" | "right"
+) {
+  const rnd = makeRnd(seed);
+  const pick = () => colors[Math.floor(rnd() * colors.length)] || colors[0];
+
+  const gapCenterX = (720 + 790) / 2; // the seam between the photo and text columns
+
+  const clusters: BalloonCluster[] = [
+    { cx: 120, cy: 92, count: 4, spread: 70, sizeRange: [30, 50] }, // top-left
+    { cx: W - 120, cy: 92, count: 4, spread: 70, sizeRange: [30, 50] }, // top-right
+    { cx: gapCenterX, cy: 42, count: 2, spread: 50, sizeRange: [26, 38] }, // top-center
+    bottomCorner === "left"
+      ? { cx: 112, cy: H - 92, count: 3, spread: 55, sizeRange: [26, 42] }
+      : { cx: W - 112, cy: H - 92, count: 3, spread: 55, sizeRange: [26, 42] },
   ];
-  balloons.forEach((b, i) => {
-    const c = colors[i % colors.length];
-    const rx = 46 * b.s;
-    const ry = 58 * b.s;
-    ctx.globalAlpha = 0.92;
-    ctx.fillStyle = c;
-    ctx.beginPath();
-    ctx.ellipse(b.x, b.y, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = hexToRgba(c, 0.4);
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(b.x, b.y + ry);
-    ctx.quadraticCurveTo(b.x + 14, b.y + ry + 70, b.x, b.y + ry + 140);
-    ctx.stroke();
+
+  clusters.forEach((cl) => {
+    for (let i = 0; i < cl.count; i++) {
+      const angle = rnd() * Math.PI * 2;
+      const dist = rnd() * cl.spread;
+      const x = cl.cx + Math.cos(angle) * dist;
+      const y = cl.cy + Math.sin(angle) * dist * 0.6;
+      const size = cl.sizeRange[0] + rnd() * (cl.sizeRange[1] - cl.sizeRange[0]);
+      const rx = size;
+      const ry = size * 1.22;
+      const tilt = (rnd() - 0.5) * 22;
+      const stringLen = 70 + rnd() * 60;
+      drawPremiumBalloon(ctx, x, y, rx, ry, pick(), tilt, stringLen);
+    }
   });
+
+  drawEdgeConfettiBits(ctx, W, H, colors, seed, 26);
 }
 
 function drawSparkleDeco(ctx: CanvasRenderingContext2D, W: number, H: number, colors: string[]) {
@@ -553,9 +726,12 @@ function drawCornersDeco(ctx: CanvasRenderingContext2D, W: number, H: number, co
 
 function paintDecoration(ctx: CanvasRenderingContext2D, tpl: CardTemplate, W: number, H: number) {
   switch (tpl.deco) {
-    case "balloons":
-      drawBalloonsDeco(ctx, W, H, tpl.decoColors);
+    case "balloons": {
+      const seed = hashSeed(tpl.id);
+      const bottomCorner: "left" | "right" = tpl.id === "pink-balloons" ? "right" : "left";
+      drawBalloonsDeco(ctx, W, H, tpl.decoColors, seed, bottomCorner);
       break;
+    }
     case "confetti":
       confetti(ctx, W, 260, tpl.decoColors, 40, 17);
       break;
