@@ -84,6 +84,8 @@ type FoodSafetyCertificationEntry = {
   certificateId: string;
   issueDate: string;
   expiryDate: string;
+  photoPath?: string;
+  photoLink?: string;
   updatedAt?: string;
 };
 
@@ -208,6 +210,7 @@ type AdminDashboardProps = {
     certificateId: string;
     issueDate: string;
     expiryDate: string;
+    photo?: File | null;
   }) => Promise<void>;
   onUpdateFoodSafetyCertification?: (
     certificationId: string,
@@ -217,6 +220,9 @@ type AdminDashboardProps = {
       certificateId: string;
       issueDate: string;
       expiryDate: string;
+      photo?: File | null;
+      currentPhotoPath?: string;
+      currentPhotoLink?: string;
     }
   ) => Promise<void>;
   onDeleteFoodSafetyCertification?: (certificationId: string, employeeName: string) => Promise<void>;
@@ -1152,12 +1158,16 @@ export default function AdminDashboard({
   const [fsFormOpen, setFsFormOpen] = useState(false);
   const [fsSaving, setFsSaving] = useState(false);
   const [editingFS, setEditingFS] = useState<FoodSafetyCertificationEntry | null>(null);
+  const [fsPhoto, setFsPhoto] = useState<File | null>(null);
+  const [fsPhotoPreview, setFsPhotoPreview] = useState<string>("");
   const [fsForm, setFsForm] = useState({
     name: "",
     employeeId: "",
     certificateId: "",
     issueDate: "",
     expiryDate: FOOD_SAFETY_DEFAULT_EXPIRY,
+    currentPhotoPath: "",
+    currentPhotoLink: "",
   });
 
   const now = new Date();
@@ -2128,7 +2138,11 @@ export default function AdminDashboard({
       certificateId: "",
       issueDate: "",
       expiryDate: FOOD_SAFETY_DEFAULT_EXPIRY,
+      currentPhotoPath: "",
+      currentPhotoLink: "",
     });
+    setFsPhoto(null);
+    setFsPhotoPreview("");
     setEditingFS(null);
   };
 
@@ -2139,14 +2153,29 @@ export default function AdminDashboard({
 
   const openEditFSForm = (item: FoodSafetyCertificationEntry) => {
     setEditingFS(item);
+    setFsPhoto(null);
+    setFsPhotoPreview(item.photoLink || "");
     setFsForm({
       name: item.name,
       employeeId: item.employeeId || "",
       certificateId: item.certificateId || "",
       issueDate: item.issueDate || "",
       expiryDate: item.expiryDate || FOOD_SAFETY_DEFAULT_EXPIRY,
+      currentPhotoPath: item.photoPath || "",
+      currentPhotoLink: item.photoLink || "",
     });
     setFsFormOpen(true);
+  };
+
+  const handleFSPhotoPick = (file: File | null) => {
+    if (!file) return;
+    const allowed = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    if (!allowed.includes(file.type)) {
+      showToast("error", "Please choose a JPG, JPEG, PNG or WEBP image.");
+      return;
+    }
+    setFsPhoto(file);
+    setFsPhotoPreview(URL.createObjectURL(file));
   };
 
   const handleSaveFS = async () => {
@@ -2157,19 +2186,28 @@ export default function AdminDashboard({
 
     try {
       setFsSaving(true);
-      const payload = {
-        name: fsForm.name.trim(),
-        employeeId: fsForm.employeeId.trim(),
-        certificateId: fsForm.certificateId.trim(),
-        issueDate: fsForm.issueDate,
-        expiryDate: fsForm.expiryDate,
-      };
 
       if (editingFS && onUpdateFoodSafetyCertification) {
-        await onUpdateFoodSafetyCertification(editingFS.id, payload);
+        await onUpdateFoodSafetyCertification(editingFS.id, {
+          name: fsForm.name.trim(),
+          employeeId: fsForm.employeeId.trim(),
+          certificateId: fsForm.certificateId.trim(),
+          issueDate: fsForm.issueDate,
+          expiryDate: fsForm.expiryDate,
+          photo: fsPhoto,
+          currentPhotoPath: fsForm.currentPhotoPath,
+          currentPhotoLink: fsForm.currentPhotoLink,
+        });
         showToast("success", "Food Safety certificate updated successfully.");
       } else if (!editingFS && onAddFoodSafetyCertification) {
-        await onAddFoodSafetyCertification(payload);
+        await onAddFoodSafetyCertification({
+          name: fsForm.name.trim(),
+          employeeId: fsForm.employeeId.trim(),
+          certificateId: fsForm.certificateId.trim(),
+          issueDate: fsForm.issueDate,
+          expiryDate: fsForm.expiryDate,
+          photo: fsPhoto,
+        });
         showToast("success", "Food Safety certificate added successfully.");
       }
 
@@ -2204,7 +2242,7 @@ export default function AdminDashboard({
     ];
     const lines = [header.map(csvCell).join(",")];
     sorted.forEach((item, idx) => {
-      const photo = getFSPhoto(item.name);
+      const photo = item.photoLink || getFSPhoto(item.name);
       lines.push([
         idx + 1,
         photo || "No Photo",
@@ -2251,7 +2289,7 @@ export default function AdminDashboard({
       const sb = statusBg(status);
       const rowBg = idx % 2 === 0 ? "#ffffff" : "#f8fafc";
       const avatar = fsInitialsAvatar(item.name);
-      const photoUrl = safeUrl(getFSPhoto(item.name)) || avatar;
+      const photoUrl = safeUrl(item.photoLink || getFSPhoto(item.name)) || avatar;
       const photo = `<img class="emp-photo" src="${photoUrl}" alt="${escHtml(item.name)}" onerror="this.onerror=null;this.src='${avatar}'" />`;
       return `<tr style="background:${rowBg}">
         <td style="text-align:center;color:#9ca3af;font-size:11px;padding:8px 6px">${idx + 1}</td>
@@ -4460,7 +4498,7 @@ export default function AdminDashboard({
                               {filteredSortedFS.map((item) => {
                                 const status = getFoodSafetyStatus(item.expiryDate);
                                 const accent = getFoodSafetyStatusColor(status);
-                                const photo = getFSPhoto(item.name);
+                                const photo = item.photoLink || getFSPhoto(item.name);
                                 const avatar = fsInitialsAvatar(item.name);
                                 return (
                                   <tr key={item.id} style={{ borderBottom: `1px solid ${theme.cardBorder}` }}>
@@ -4501,7 +4539,7 @@ export default function AdminDashboard({
                         {filteredSortedFS.map((item) => {
                           const status = getFoodSafetyStatus(item.expiryDate);
                           const accent = getFoodSafetyStatusColor(status);
-                          const photo = getFSPhoto(item.name);
+                          const photo = item.photoLink || getFSPhoto(item.name);
                           const avatar = fsInitialsAvatar(item.name);
                           return (
                             <div key={item.id} style={{ background: theme.cardBackground, border: `1px solid ${theme.cardBorder}`, borderLeft: `4px solid ${accent}`, borderRadius: 12, padding: "12px 14px" }}>
@@ -5250,6 +5288,40 @@ export default function AdminDashboard({
                 <div>
                   <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Employee ID</label>
                   <input style={inputStyle()} value={fsForm.employeeId} onChange={(e) => setFsForm((prev) => ({ ...prev, employeeId: e.target.value }))} placeholder="Optional" />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Employee Photo</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <img
+                      src={fsPhotoPreview || getFSPhoto(fsForm.name) || fsInitialsAvatar(fsForm.name)}
+                      alt="Employee photo preview"
+                      width={64} height={64}
+                      onError={(e) => { const a = fsInitialsAvatar(fsForm.name); if (e.currentTarget.src !== a) e.currentTarget.src = a; }}
+                      style={{ width: 64, height: 64, borderRadius: "50%", objectFit: "cover", border: `1px solid ${theme.cardBorder}`, background: theme.softCardBackground, flexShrink: 0 }}
+                    />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+                      <label style={{ ...buttonStyle(false), display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer", margin: 0 }}>
+                        📷 Upload Photo
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                          style={{ display: "none" }}
+                          onChange={(e) => { handleFSPhotoPick(e.target.files?.[0] || null); e.target.value = ""; }}
+                        />
+                      </label>
+                      {fsPhotoPreview && (
+                        <button
+                          type="button"
+                          style={{ ...buttonStyle(false), fontSize: 12 }}
+                          onClick={() => { setFsPhoto(null); setFsPhotoPreview(""); setFsForm((prev) => ({ ...prev, currentPhotoPath: "", currentPhotoLink: "" })); }}
+                        >
+                          Remove photo
+                        </button>
+                      )}
+                      <div style={{ fontSize: 11, color: theme.subtleText }}>JPG, JPEG, PNG or WEBP. If left empty, the matched profile photo is used.</div>
+                    </div>
+                  </div>
                 </div>
 
                 <div style={{ gridColumn: "1 / -1" }}>

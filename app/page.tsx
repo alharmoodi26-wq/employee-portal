@@ -136,6 +136,8 @@ type FoodSafetyCertificationEntry = {
   certificateId: string;
   issueDate: string;
   expiryDate: string;
+  photoPath?: string;
+  photoLink?: string;
   updatedAt?: string;
 };
 
@@ -622,6 +624,7 @@ export default function HomePage() {
   // URL caches: path → downloadURL — avoids re-fetching on every snapshot
   const birthdayUrlCache = useRef<Record<string, string>>({});
   const ohcUrlCache = useRef<Record<string, string>>({});
+  const foodSafetyUrlCache = useRef<Record<string, string>>({});
 
   const showToast = (type: ToastType, message: string) => {
     setToast({ type, message });
@@ -1087,27 +1090,46 @@ export default function HomePage() {
 
     const unsubscribe = onSnapshot(
       query(collection(db, "foodSafetyCertifications"), orderBy("createdAt", "desc")),
-      (snapshot) => {
+      async (snapshot) => {
         try {
-          const items = snapshot.docs.map((document) => {
-            const data = document.data();
-            const updatedRaw = data.updatedAt;
-            let updatedAt = "";
-            if (updatedRaw && typeof updatedRaw.toDate === "function") {
-              updatedAt = updatedRaw.toDate().toISOString();
-            } else if (typeof updatedRaw === "string") {
-              updatedAt = updatedRaw;
-            }
-            return {
-              id: document.id,
-              name: data.name ?? "",
-              employeeId: data.employeeId ?? "",
-              certificateId: data.certificateId ?? "",
-              issueDate: data.issueDate ?? "",
-              expiryDate: data.expiryDate ?? "",
-              updatedAt,
-            } as FoodSafetyCertificationEntry;
-          });
+          const items = await Promise.all(
+            snapshot.docs.map(async (document) => {
+              const data = document.data();
+              const updatedRaw = data.updatedAt;
+              let updatedAt = "";
+              if (updatedRaw && typeof updatedRaw.toDate === "function") {
+                updatedAt = updatedRaw.toDate().toISOString();
+              } else if (typeof updatedRaw === "string") {
+                updatedAt = updatedRaw;
+              }
+
+              let photoLink = data.photoLink ?? "";
+              if (!photoLink && data.photoPath) {
+                if (foodSafetyUrlCache.current[data.photoPath]) {
+                  photoLink = foodSafetyUrlCache.current[data.photoPath];
+                } else {
+                  try {
+                    photoLink = await getDownloadURL(ref(storage, data.photoPath));
+                    foodSafetyUrlCache.current[data.photoPath] = photoLink;
+                  } catch (error) {
+                    console.error("Error getting Food Safety photo URL:", error);
+                  }
+                }
+              }
+
+              return {
+                id: document.id,
+                name: data.name ?? "",
+                employeeId: data.employeeId ?? "",
+                certificateId: data.certificateId ?? "",
+                issueDate: data.issueDate ?? "",
+                expiryDate: data.expiryDate ?? "",
+                photoPath: data.photoPath ?? "",
+                photoLink,
+                updatedAt,
+              } as FoodSafetyCertificationEntry;
+            })
+          );
           setFoodSafetyCertifications(items);
           setLoadingFoodSafety(false);
         } catch (error) {
@@ -2237,13 +2259,21 @@ export default function HomePage() {
     certificateId: string;
     issueDate: string;
     expiryDate: string;
+    photo?: File | null;
   }) => {
+    let photoPath = "";
+    if (payload.photo) {
+      const files = await uploadFilesToStorage("food-safety-photos", "shared", [payload.photo]);
+      photoPath = files[0]?.path ?? "";
+    }
     await addDoc(collection(db, "foodSafetyCertifications"), {
       name: payload.name,
       employeeId: payload.employeeId ?? "",
       certificateId: payload.certificateId,
       issueDate: payload.issueDate,
       expiryDate: payload.expiryDate,
+      photoPath,
+      photoLink: "",
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -2257,8 +2287,18 @@ export default function HomePage() {
       certificateId: string;
       issueDate: string;
       expiryDate: string;
+      photo?: File | null;
+      currentPhotoPath?: string;
+      currentPhotoLink?: string;
     }
   ) => {
+    let photoPath = payload.currentPhotoPath ?? "";
+    let photoLink = payload.currentPhotoLink ?? "";
+    if (payload.photo) {
+      const files = await uploadFilesToStorage("food-safety-photos", "shared", [payload.photo]);
+      photoPath = files[0]?.path ?? "";
+      photoLink = "";
+    }
     const refDoc = doc(db, "foodSafetyCertifications", certificationId);
     await updateDoc(refDoc, {
       name: payload.name,
@@ -2266,6 +2306,8 @@ export default function HomePage() {
       certificateId: payload.certificateId,
       issueDate: payload.issueDate,
       expiryDate: payload.expiryDate,
+      photoPath,
+      photoLink,
       updatedAt: serverTimestamp(),
     });
   };
