@@ -1152,8 +1152,6 @@ export default function AdminDashboard({
 
   // ── Basic Food Safety Certificate Monitoring — state ──
   const [fsSearch, setFsSearch] = useState("");
-  const [fsStatusFilter, setFsStatusFilter] = useState<"All" | FoodSafetyStatus>("All");
-  const [fsSort, setFsSort] = useState<"expiry" | "name">("expiry");
   const [fsFormOpen, setFsFormOpen] = useState(false);
   const [fsSaving, setFsSaving] = useState(false);
   const [editingFS, setEditingFS] = useState<FoodSafetyCertificationEntry | null>(null);
@@ -1246,16 +1244,15 @@ export default function AdminDashboard({
         if (q &&
           !item.name.toLowerCase().includes(q) &&
           !(item.certificateId || "").toLowerCase().includes(q)) return false;
-        if (fsStatusFilter !== "All" && getFoodSafetyStatus(item.expiryDate) !== fsStatusFilter) return false;
         return true;
       })
+      // Always sorted by expiry date ascending — soonest-to-expire first.
       .sort((a, b) => {
-        if (fsSort === "name") return a.name.localeCompare(b.name);
         const ta = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
         const tb = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
         return ta - tb;
       });
-  }, [foodSafetyCertifications, fsSearch, fsStatusFilter, fsSort]);
+  }, [foodSafetyCertifications, fsSearch]);
 
   // ── Employee photo lookup — built ONCE from the existing HR photo
   //    sources (OHC headshots, birthday photos, employee profile photos).
@@ -4459,16 +4456,6 @@ export default function AdminDashboard({
                       onChange={e => setFsSearch(e.target.value)}
                       placeholder="🔍  Search by staff name or certificate ID…"
                     />
-                    <select style={{ ...inputStyle(), flex: "0 0 auto", width: "auto" }} value={fsStatusFilter} onChange={e => setFsStatusFilter(e.target.value as "All" | FoodSafetyStatus)}>
-                      <option value="All">All statuses</option>
-                      <option value="Valid">Valid</option>
-                      <option value="Expiring Soon">Expiring Soon</option>
-                      <option value="Expired">Expired</option>
-                    </select>
-                    <select style={{ ...inputStyle(), flex: "0 0 auto", width: "auto" }} value={fsSort} onChange={e => setFsSort(e.target.value as "expiry" | "name")}>
-                      <option value="expiry">Sort by expiry date</option>
-                      <option value="name">Sort alphabetically</option>
-                    </select>
                     <button style={buttonStyle(false)} onClick={handlePrintFSReport}>🖨 PDF</button>
                     <button style={buttonStyle(false)} onClick={handleExportFSExcel}>📊 Excel</button>
                     <button style={buttonStyle(true)} onClick={openAddFSForm}>+ Add Certificate</button>
@@ -4570,7 +4557,7 @@ export default function AdminDashboard({
                       </div>
                     </>
                   ) : (
-                    <EmptyState icon="🥗" title="No Food Safety certificates" description={(fsSearch || fsStatusFilter !== "All") ? "No results for your search or filter." : "Add certificates to track renewals and expiry alerts."} />
+                    <EmptyState icon="🥗" title="No Food Safety certificates" description={fsSearch ? "No results for your search." : "Add certificates to track renewals and expiry alerts."} />
                   )}
                 </div>
               )}
