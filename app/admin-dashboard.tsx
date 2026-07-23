@@ -54,7 +54,7 @@ import {
 } from "./birthday-card";
 
 type DashboardTab = "dashboard" | "review" | "employees" | "hr" | "invoices" | "assessments" | "reports";
-type HRSubTab = "attendance" | "ohc" | "birthdays";
+type HRSubTab = "attendance" | "ohc" | "foodSafety" | "birthdays";
 type ReviewFilter = "pending" | "active" | "approved";
 
 type BirthdayEntry = {
@@ -76,6 +76,18 @@ type OHCCertificationEntry = {
   certificatePhotoLink?: string;
   applied?: boolean;
 };
+
+type FoodSafetyCertificationEntry = {
+  id: string;
+  name: string;
+  employeeId?: string;
+  certificateId: string;
+  issueDate: string;
+  expiryDate: string;
+  updatedAt?: string;
+};
+
+const FOOD_SAFETY_DEFAULT_EXPIRY = "2028-07-02";
 
 type InvoiceStatus = "Approved" | "Pending Review" | "Paid";
 
@@ -189,6 +201,25 @@ type AdminDashboardProps = {
   ) => Promise<void>;
   onDeleteOHCCertification?: (certificationId: string, employeeName: string) => Promise<void>;
   onSetOHCApplied?: (certificationId: string, applied: boolean) => Promise<void>;
+  foodSafetyCertifications?: FoodSafetyCertificationEntry[];
+  onAddFoodSafetyCertification?: (payload: {
+    name: string;
+    employeeId?: string;
+    certificateId: string;
+    issueDate: string;
+    expiryDate: string;
+  }) => Promise<void>;
+  onUpdateFoodSafetyCertification?: (
+    certificationId: string,
+    payload: {
+      name: string;
+      employeeId?: string;
+      certificateId: string;
+      issueDate: string;
+      expiryDate: string;
+    }
+  ) => Promise<void>;
+  onDeleteFoodSafetyCertification?: (certificationId: string, employeeName: string) => Promise<void>;
   onUpdateInvoice: (
     invoiceId: string,
     payload: {
@@ -298,6 +329,66 @@ function getOHCHint(expiryDate: string) {
   if (days === 0) return "Expires today";
   if (days === 1) return "Expires in 1 day";
   return `Expires in ${days} days`;
+}
+
+// ── Basic Food Safety Certificate — status + helpers ──
+// Mirrors the OHC status model but uses a 30-day "Expiring Soon" window.
+type FoodSafetyStatus = "Valid" | "Expiring Soon" | "Expired";
+
+function getFoodSafetyStatus(expiryDate: string): FoodSafetyStatus {
+  const days = getDaysUntil(expiryDate);
+  if (days === null) return "Valid";
+  if (days < 0) return "Expired";
+  if (days <= 30) return "Expiring Soon";
+  return "Valid";
+}
+
+function getFoodSafetyBadgeStyle(status: FoodSafetyStatus): React.CSSProperties {
+  const isDark = getThemeMode() === "dark";
+  const base: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", whiteSpace: "nowrap",
+    borderRadius: 999, padding: "5px 10px", fontSize: 12, fontWeight: 800,
+  };
+  if (status === "Expired") return { ...base,
+    background: isDark ? "rgba(239,68,68,0.14)" : "#fee2e2",
+    color: isDark ? "#f87171" : "#991b1b",
+    border: `1px solid ${isDark ? "rgba(239,68,68,0.3)" : "#fecaca"}`,
+  };
+  if (status === "Expiring Soon") return { ...base,
+    background: isDark ? "rgba(245,158,11,0.14)" : "#fef3c7",
+    color: isDark ? "#fbbf24" : "#92400e",
+    border: `1px solid ${isDark ? "rgba(245,158,11,0.3)" : "#fcd34d"}`,
+  };
+  return { ...base,
+    background: isDark ? "rgba(16,185,129,0.14)" : "#dcfce7",
+    color: isDark ? "#34d399" : "#166534",
+    border: `1px solid ${isDark ? "rgba(16,185,129,0.3)" : "#86efac"}`,
+  };
+}
+
+function getFoodSafetyStatusColor(status: FoodSafetyStatus) {
+  return status === "Expired" ? "#ef4444" : status === "Expiring Soon" ? "#f59e0b" : "#10b981";
+}
+
+function getFoodSafetyDaysLabel(expiryDate: string) {
+  const days = getDaysUntil(expiryDate);
+  if (days === null) return "—";
+  if (days < 0) return `Expired ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ago`;
+  if (days === 0) return "Expires today";
+  return `${days} day${days === 1 ? "" : "s"} remaining`;
+}
+
+function formatFoodSafetyDate(dateString: string) {
+  const d = parseLocalDate(dateString);
+  if (!d) return "—";
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+function formatFoodSafetyUpdated(iso?: string) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 function formatFilesLabel(files: File[]) {
@@ -842,6 +933,7 @@ export default function AdminDashboard({
   birthdayCardSettings,
   onSaveBirthdayCardSettings,
   ohcCertifications = [],
+  foodSafetyCertifications = [],
   invoices,
   worksHasMore = false,
   tasksHasMore = false,
@@ -863,6 +955,9 @@ export default function AdminDashboard({
   onUpdateOHCCertification,
   onDeleteOHCCertification,
   onSetOHCApplied,
+  onAddFoodSafetyCertification,
+  onUpdateFoodSafetyCertification,
+  onDeleteFoodSafetyCertification,
   onUpdateInvoice,
   onApproveInvoice,
   onOpenInvoiceAttachment,
@@ -1034,6 +1129,22 @@ export default function AdminDashboard({
     currentCertificatePhotoLink: "",
   });
 
+  // ── Basic Food Safety Certificate Monitoring — state ──
+  const [fsSearch, setFsSearch] = useState("");
+  const [fsCertSearch, setFsCertSearch] = useState("");
+  const [fsStatusFilter, setFsStatusFilter] = useState<"All" | FoodSafetyStatus>("All");
+  const [fsSort, setFsSort] = useState<"expiry" | "name">("expiry");
+  const [fsFormOpen, setFsFormOpen] = useState(false);
+  const [fsSaving, setFsSaving] = useState(false);
+  const [editingFS, setEditingFS] = useState<FoodSafetyCertificationEntry | null>(null);
+  const [fsForm, setFsForm] = useState({
+    name: "",
+    employeeId: "",
+    certificateId: "",
+    issueDate: "",
+    expiryDate: FOOD_SAFETY_DEFAULT_EXPIRY,
+  });
+
   const now = new Date();
   const todayMonthDay = `${String(now.getMonth() + 1).padStart(2, "0")}-${String(
     now.getDate()
@@ -1078,6 +1189,49 @@ export default function AdminDashboard({
         return ta - tb;
       });
   }, [ohcCertifications, ohcSearch]);
+
+  // ── Basic Food Safety Certificate Monitoring — derived data ──
+  const fsRenewalAlerts = useMemo(
+    () =>
+      foodSafetyCertifications.filter((item) => {
+        const status = getFoodSafetyStatus(item.expiryDate);
+        return status === "Expired" || status === "Expiring Soon";
+      }),
+    [foodSafetyCertifications]
+  );
+
+  const validFS = useMemo(
+    () => foodSafetyCertifications.filter((item) => getFoodSafetyStatus(item.expiryDate) === "Valid"),
+    [foodSafetyCertifications]
+  );
+
+  const expiringSoonFS = useMemo(
+    () => foodSafetyCertifications.filter((item) => getFoodSafetyStatus(item.expiryDate) === "Expiring Soon"),
+    [foodSafetyCertifications]
+  );
+
+  const expiredFS = useMemo(
+    () => foodSafetyCertifications.filter((item) => getFoodSafetyStatus(item.expiryDate) === "Expired"),
+    [foodSafetyCertifications]
+  );
+
+  const filteredSortedFS = useMemo(() => {
+    const nameQuery = fsSearch.trim().toLowerCase();
+    const certQuery = fsCertSearch.trim().toLowerCase();
+    return foodSafetyCertifications
+      .filter((item) => {
+        if (nameQuery && !item.name.toLowerCase().includes(nameQuery)) return false;
+        if (certQuery && !(item.certificateId || "").toLowerCase().includes(certQuery)) return false;
+        if (fsStatusFilter !== "All" && getFoodSafetyStatus(item.expiryDate) !== fsStatusFilter) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (fsSort === "name") return a.name.localeCompare(b.name);
+        const ta = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
+        const tb = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
+        return ta - tb;
+      });
+  }, [foodSafetyCertifications, fsSearch, fsCertSearch, fsStatusFilter, fsSort]);
 
   const bdDaysUntil = (bStr: string): number => {
     if (!bStr) return 999;
@@ -1901,6 +2055,250 @@ export default function AdminDashboard({
     resetOHCForm();
   };
 
+  // ── Basic Food Safety Certificate Monitoring — actions ──
+  const resetFSForm = () => {
+    setFsForm({
+      name: "",
+      employeeId: "",
+      certificateId: "",
+      issueDate: "",
+      expiryDate: FOOD_SAFETY_DEFAULT_EXPIRY,
+    });
+    setEditingFS(null);
+  };
+
+  const openAddFSForm = () => {
+    resetFSForm();
+    setFsFormOpen(true);
+  };
+
+  const openEditFSForm = (item: FoodSafetyCertificationEntry) => {
+    setEditingFS(item);
+    setFsForm({
+      name: item.name,
+      employeeId: item.employeeId || "",
+      certificateId: item.certificateId || "",
+      issueDate: item.issueDate || "",
+      expiryDate: item.expiryDate || FOOD_SAFETY_DEFAULT_EXPIRY,
+    });
+    setFsFormOpen(true);
+  };
+
+  const handleSaveFS = async () => {
+    if (!fsForm.name.trim() || !fsForm.certificateId.trim() || !fsForm.expiryDate) {
+      showToast("error", "Please enter the staff name, certificate ID and expiry date.");
+      return;
+    }
+
+    try {
+      setFsSaving(true);
+      const payload = {
+        name: fsForm.name.trim(),
+        employeeId: fsForm.employeeId.trim(),
+        certificateId: fsForm.certificateId.trim(),
+        issueDate: fsForm.issueDate,
+        expiryDate: fsForm.expiryDate,
+      };
+
+      if (editingFS && onUpdateFoodSafetyCertification) {
+        await onUpdateFoodSafetyCertification(editingFS.id, payload);
+        showToast("success", "Food Safety certificate updated successfully.");
+      } else if (!editingFS && onAddFoodSafetyCertification) {
+        await onAddFoodSafetyCertification(payload);
+        showToast("success", "Food Safety certificate added successfully.");
+      }
+
+      setFsFormOpen(false);
+      resetFSForm();
+    } catch (error) {
+      console.error(error);
+      showToast("error", "Error saving Food Safety certificate.");
+    } finally {
+      setFsSaving(false);
+    }
+  };
+
+  const handleDeleteFSInsideForm = async () => {
+    if (!editingFS || !onDeleteFoodSafetyCertification) return;
+    setFsFormOpen(false);
+    await onDeleteFoodSafetyCertification(editingFS.id, editingFS.name);
+    resetFSForm();
+  };
+
+  const handleExportFSExcel = () => {
+    const sorted = [...filteredSortedFS];
+    const csvCell = (value: string | number) => {
+      const s = String(value ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = [
+      "#", "Staff Name", "Employee ID", "Certificate ID", "Issue Date",
+      "Expiry Date", "Status", "Days Remaining", "Last Updated",
+    ];
+    const lines = [header.map(csvCell).join(",")];
+    sorted.forEach((item, idx) => {
+      lines.push([
+        idx + 1,
+        item.name,
+        item.employeeId || "",
+        item.certificateId || "",
+        item.issueDate || "",
+        item.expiryDate || "",
+        getFoodSafetyStatus(item.expiryDate),
+        getFoodSafetyDaysLabel(item.expiryDate),
+        formatFoodSafetyUpdated(item.updatedAt),
+      ].map(csvCell).join(","));
+    });
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `basic-food-safety-certificates-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const handlePrintFSReport = () => {
+    const popup = window.open("", "_blank", "width=1200,height=900");
+    if (!popup) return;
+
+    const sorted = [...foodSafetyCertifications].sort((a, b) => {
+      const ta = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
+      const tb = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
+      return ta - tb;
+    });
+
+    const total        = sorted.length;
+    const validCount   = sorted.filter(i => getFoodSafetyStatus(i.expiryDate) === "Valid").length;
+    const soonCount    = sorted.filter(i => getFoodSafetyStatus(i.expiryDate) === "Expiring Soon").length;
+    const expiredCount = sorted.filter(i => getFoodSafetyStatus(i.expiryDate) === "Expired").length;
+
+    const statusColor = (s: FoodSafetyStatus) => s === "Expired" ? "#dc2626" : s === "Expiring Soon" ? "#d97706" : "#16a34a";
+    const statusBg    = (s: FoodSafetyStatus) => s === "Expired" ? "#fef2f2" : s === "Expiring Soon" ? "#fffbeb" : "#f0fdf4";
+
+    const rows = sorted.map((item, idx) => {
+      const status = getFoodSafetyStatus(item.expiryDate);
+      const sc = statusColor(status);
+      const sb = statusBg(status);
+      const rowBg = idx % 2 === 0 ? "#ffffff" : "#f8fafc";
+      return `<tr style="background:${rowBg}">
+        <td style="text-align:center;color:#9ca3af;font-size:11px;padding:8px 6px">${idx + 1}</td>
+        <td style="padding:8px 12px;font-weight:700;font-size:13px;color:#1e293b">${escHtml(item.name)}</td>
+        <td style="padding:8px 12px;font-size:12px;color:#6b7280">${escHtml(item.employeeId || "—")}</td>
+        <td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600">${escHtml(item.certificateId || "—")}</td>
+        <td style="padding:8px 12px;font-size:12px;color:#6b7280;white-space:nowrap">${escHtml(formatFoodSafetyDate(item.issueDate))}</td>
+        <td style="padding:8px 12px;font-size:13px;font-weight:600;color:#374151;white-space:nowrap">${escHtml(formatFoodSafetyDate(item.expiryDate))}</td>
+        <td style="padding:8px 12px;text-align:center">
+          <span style="display:inline-block;padding:3px 11px;border-radius:999px;font-size:11px;font-weight:800;color:${sc};background:${sb};border:1px solid ${sc}30">${escHtml(status)}</span>
+        </td>
+        <td style="padding:8px 12px;font-size:12px;color:#6b7280;white-space:nowrap">${escHtml(getFoodSafetyDaysLabel(item.expiryDate))}</td>
+      </tr>`;
+    }).join("");
+
+    popup.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Basic Food Safety Certificates Report — EIHG</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#111827;background:#f9fafb}
+    .page{max-width:1060px;margin:0 auto;padding:40px 32px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:22px;border-bottom:3px solid #0f1c35;margin-bottom:24px}
+    .brand-box{display:flex;align-items:center;gap:14px}
+    .brand-icon{width:52px;height:52px;background:linear-gradient(145deg,#0f1c35,#1b2a4a);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid #F0C040;flex-shrink:0}
+    .brand-title{font-size:19px;font-weight:900;color:#0f1c35;letter-spacing:-0.01em}
+    .brand-sub{font-size:11px;color:#6b7280;margin-top:2px;font-weight:500}
+    .report-meta{text-align:right;font-size:12px;color:#6b7280;line-height:1.9}
+    .report-meta strong{color:#374151}
+    .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:26px}
+    .tile{border-radius:12px;padding:16px 12px;text-align:center}
+    .tile-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+    .tile-value{font-size:28px;font-weight:900;line-height:1}
+    table{width:100%;border-collapse:collapse;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border-radius:10px;overflow:hidden}
+    thead tr{background:#0f1c35}
+    thead th{padding:11px 12px;text-align:left;font-weight:700;font-size:11px;letter-spacing:.05em;color:#F0C040}
+    thead th:first-child{text-align:center}
+    tbody td{border-bottom:1px solid #e5e7eb;vertical-align:middle}
+    .footer{margin-top:30px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
+    .no-print{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:8px;padding:10px 20px;background:#fff;border-bottom:1px solid #e5e7eb;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}table{box-shadow:none}}
+  </style>
+</head>
+<body>
+<div class="no-print">
+  <button onclick="window.close()" style="padding:8px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,#0f1c35,#1b2a4a);color:#F0C040;cursor:pointer;font-size:13px;font-weight:700">← Back to Portal</button>
+  <button onclick="window.print()" style="padding:8px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#1e293b;cursor:pointer;font-size:13px;font-weight:700">🖨 Print / Save as PDF</button>
+</div>
+<div class="page">
+  <div class="header">
+    <div class="brand-box">
+      <div class="brand-icon">
+        <span style="color:#F0C040;font-size:13px;font-weight:900;letter-spacing:0.06em;line-height:1">EIHG</span>
+        <span style="color:#c9a520;font-size:7px;font-weight:700;letter-spacing:0.18em;line-height:1;margin-top:3px">PORTAL</span>
+      </div>
+      <div>
+        <div class="brand-title">Emirates International Holdings Group</div>
+        <div class="brand-sub">Basic Food Safety Certificates — Full Report · Sorted by Expiry Date</div>
+      </div>
+    </div>
+    <div class="report-meta">
+      <strong>Printed by:</strong> ${escHtml(currentUser.name)}<br/>
+      <strong>Date:</strong> ${new Date().toLocaleString()}<br/>
+      <strong>Total Records:</strong> ${total}
+    </div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile" style="background:#f0fdf4;border:1px solid #bbf7d0">
+      <div class="tile-label" style="color:#166534">Valid</div>
+      <div class="tile-value" style="color:#16a34a">${validCount}</div>
+    </div>
+    <div class="tile" style="background:#fffbeb;border:1px solid #fde68a">
+      <div class="tile-label" style="color:#92400e">Expiring Soon</div>
+      <div class="tile-value" style="color:#d97706">${soonCount}</div>
+    </div>
+    <div class="tile" style="background:#fef2f2;border:1px solid #fecaca">
+      <div class="tile-label" style="color:#991b1b">Expired</div>
+      <div class="tile-value" style="color:#dc2626">${expiredCount}</div>
+    </div>
+    <div class="tile" style="background:#eff6ff;border:1px solid #bfdbfe">
+      <div class="tile-label" style="color:#1e40af">Total</div>
+      <div class="tile-value" style="color:#2563eb">${total}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:36px;text-align:center">#</th>
+        <th>Staff Name</th>
+        <th style="width:110px">Employee ID</th>
+        <th style="width:130px">Certificate ID</th>
+        <th style="width:110px">Issue Date</th>
+        <th style="width:110px">Expiry Date</th>
+        <th style="width:120px;text-align:center">Status</th>
+        <th style="width:140px">Days Remaining</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <span>Emirates International Holdings Group — Confidential Document</span>
+    <span>Generated: ${new Date().toLocaleString()}</span>
+  </div>
+</div>
+</body>
+</html>`);
+    popup.document.close();
+    setTimeout(() => popup.focus(), 100);
+  };
+
   const handleAssignTask = async () => {
     if (!selectedEmployee || !assignForm.title) {
       showToast("error", "Please select an employee and fill the task title.");
@@ -2069,6 +2467,17 @@ export default function AdminDashboard({
                       <div style={{ fontSize: 12, color: theme.subtleText }}>Expired or expiring soon</div>
                     </div>
                     <span style={{ marginLeft: "auto", fontSize: 11, color: "#ef4444", fontWeight: 800 }}>→</span>
+                  </button>
+                )}
+                {fsRenewalAlerts.length > 0 && (
+                  <button onClick={() => { setActiveTab("hr"); setHrSubTab("foodSafety"); setShowNotifications(false); }}
+                    style={{ ...notifItemStyle(theme), background: "rgba(14,165,233,0.08)" }}>
+                    <span style={{ fontSize: 20 }}>🥗</span>
+                    <div>
+                      <div style={{ fontWeight: 700, color: theme.title, fontSize: 13 }}>{fsRenewalAlerts.length} Food Safety cert{fsRenewalAlerts.length > 1 ? "s" : ""} expiring</div>
+                      <div style={{ fontSize: 12, color: theme.subtleText }}>Expired or expiring within 30 days</div>
+                    </div>
+                    <span style={{ marginLeft: "auto", fontSize: 11, color: "#0ea5e9", fontWeight: 800 }}>→</span>
                   </button>
                 )}
               </>
@@ -2496,7 +2905,7 @@ export default function AdminDashboard({
                 {[
                   { label: "Review Queue", tab: "review" as DashboardTab,    icon: "📋", color: "#f59e0b", badge: pendingCount },
                   { label: "Employees",    tab: "employees" as DashboardTab, icon: "👥", color: "#6366f1", badge: 0 },
-                  { label: "HR",           tab: "hr" as DashboardTab,        icon: "⚕️", color: "#ef4444", badge: ohcRenewalAlerts.length + todaysBirthdays.length },
+                  { label: "HR",           tab: "hr" as DashboardTab,        icon: "⚕️", color: "#ef4444", badge: ohcRenewalAlerts.length + fsRenewalAlerts.length + todaysBirthdays.length },
                   { label: "Invoices",     tab: "invoices" as DashboardTab,  icon: "🧾", color: "#8b5cf6", badge: invoiceReviewItems.length },
                 ].map(({ label, tab, icon, color, badge }) => (
                   <button
@@ -3724,10 +4133,11 @@ export default function AdminDashboard({
             <div style={{ display: "grid", gap: 16 }}>
 
               {/* HR overview tiles — double as tab switcher */}
-              <div className="hr-overview-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12 }}>
+              <div className="hr-overview-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
                 {([
                   { id: "attendance" as HRSubTab, icon: "🕐", label: "Pending Attendance", value: pendingAttendanceCount, color: "#f59e0b" },
                   { id: "ohc"        as HRSubTab, icon: "⚕️", label: "OHC Alerts",          value: expiringSoonOHCCerts.length + expiredOHCCerts.length, color: "#ef4444" },
+                  { id: "foodSafety" as HRSubTab, icon: "🥗", label: "Food Safety Alerts",  value: expiringSoonFS.length + expiredFS.length, color: "#0ea5e9" },
                   { id: "birthdays"  as HRSubTab, icon: "🎂", label: "Birthdays",            value: birthdays.length,       color: "#ec4899" },
                 ] as { id: HRSubTab; icon: string; label: string; value: number; color: string }[]).map(({ id, icon, label, value, color }) => (
                   <button key={id} onClick={() => setHrSubTab(id)} style={{
@@ -3881,6 +4291,142 @@ export default function AdminDashboard({
                       <EmptyState icon="⚕️" title="No OHC certificates" description={ohcSearch ? "No results for your search." : "Add certificates to track renewals and expiry alerts."} />
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* ── Basic Food Safety Certificate Monitoring ── */}
+              {hrSubTab === "foodSafety" && (
+                <div style={{ display: "grid", gap: 14 }}>
+                  {/* Summary cards */}
+                  <div className="fs-stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                    {[
+                      { label: "Total Certificates", value: foodSafetyCertifications.length, color: "#6366f1" },
+                      { label: "Valid",              value: validFS.length,                 color: "#10b981" },
+                      { label: "Expiring Soon",      value: expiringSoonFS.length,          color: "#f59e0b" },
+                      { label: "Expired",            value: expiredFS.length,               color: "#ef4444" },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} style={{ background: theme.cardBackground, borderTop: `3px solid ${color}`, borderLeft: `1px solid ${theme.cardBorder}`, borderRight: `1px solid ${theme.cardBorder}`, borderBottom: `1px solid ${theme.cardBorder}`, borderRadius: 12, padding: "12px 14px" }}>
+                        <div style={{ fontSize: 11, color: theme.subtleText, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
+                        <div style={{ fontSize: 24, fontWeight: 900, color, lineHeight: 1 }}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Renewal alert banner (in-app notification) */}
+                  {fsRenewalAlerts.length > 0 && (
+                    <div style={{ borderRadius: 14, border: `1px solid ${theme.cardBorder}`, borderLeft: "4px solid #f59e0b", background: theme.softCardBackground, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 20 }}>⚠️</span>
+                      <div style={{ fontSize: 13, color: theme.title, fontWeight: 700 }}>
+                        {fsRenewalAlerts.length} Food Safety certificate{fsRenewalAlerts.length > 1 ? "s" : ""} need attention
+                        <span style={{ fontWeight: 500, color: theme.subtleText, marginLeft: 6 }}>· expiring within 30 days or already expired</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Search + filters + actions */}
+                  <div className="fs-action-bar" style={{ ...cardStyle(), padding: "12px 16px", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <input
+                      style={{ ...inputStyle(), flex: "1 1 180px", minWidth: 0 }}
+                      value={fsSearch}
+                      onChange={e => setFsSearch(e.target.value)}
+                      placeholder="🔍  Search staff name…"
+                    />
+                    <input
+                      style={{ ...inputStyle(), flex: "1 1 160px", minWidth: 0 }}
+                      value={fsCertSearch}
+                      onChange={e => setFsCertSearch(e.target.value)}
+                      placeholder="🔍  Search certificate ID…"
+                    />
+                    <select style={{ ...inputStyle(), flex: "0 1 150px", minWidth: 0 }} value={fsStatusFilter} onChange={e => setFsStatusFilter(e.target.value as "All" | FoodSafetyStatus)}>
+                      <option value="All">All statuses</option>
+                      <option value="Valid">Valid</option>
+                      <option value="Expiring Soon">Expiring Soon</option>
+                      <option value="Expired">Expired</option>
+                    </select>
+                    <select style={{ ...inputStyle(), flex: "0 1 160px", minWidth: 0 }} value={fsSort} onChange={e => setFsSort(e.target.value as "expiry" | "name")}>
+                      <option value="expiry">Sort by expiry date</option>
+                      <option value="name">Sort alphabetically</option>
+                    </select>
+                    <button style={buttonStyle(false)} onClick={handlePrintFSReport}>🖨 PDF</button>
+                    <button style={buttonStyle(false)} onClick={handleExportFSExcel}>📊 Excel</button>
+                    <button style={buttonStyle(true)} onClick={openAddFSForm}>+ Add Certificate</button>
+                  </div>
+
+                  {/* Desktop table */}
+                  {filteredSortedFS.length > 0 ? (
+                    <>
+                      <div className="fs-table-desktop" style={{ ...cardStyle(), padding: 0, overflow: "hidden" }}>
+                        <div style={{ overflowX: "auto" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                            <thead>
+                              <tr style={{ background: theme.softCardBackground }}>
+                                {["Staff Name", "Employee ID", "Certificate ID", "Issue Date", "Expiry Date", "Status", "Days Remaining", "Last Updated", "Actions"].map((h) => (
+                                  <th key={h} style={{ textAlign: h === "Status" || h === "Actions" ? "center" : "left", padding: "11px 14px", fontSize: 11, fontWeight: 700, color: theme.subtleText, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderBottom: `1px solid ${theme.cardBorder}` }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredSortedFS.map((item) => {
+                                const status = getFoodSafetyStatus(item.expiryDate);
+                                const accent = getFoodSafetyStatusColor(status);
+                                return (
+                                  <tr key={item.id} style={{ borderBottom: `1px solid ${theme.cardBorder}` }}>
+                                    <td style={{ padding: "10px 14px", fontWeight: 700, color: theme.title, whiteSpace: "nowrap" }}>{item.name}</td>
+                                    <td style={{ padding: "10px 14px", color: theme.mutedText }}>{item.employeeId || "—"}</td>
+                                    <td style={{ padding: "10px 14px", color: theme.mutedText, fontWeight: 600 }}>{item.certificateId || "—"}</td>
+                                    <td style={{ padding: "10px 14px", color: theme.mutedText, whiteSpace: "nowrap" }}>{formatFoodSafetyDate(item.issueDate)}</td>
+                                    <td style={{ padding: "10px 14px", color: accent, fontWeight: 700, whiteSpace: "nowrap" }}>{formatFoodSafetyDate(item.expiryDate)}</td>
+                                    <td style={{ padding: "10px 14px", textAlign: "center" }}><span style={getFoodSafetyBadgeStyle(status)}>{status}</span></td>
+                                    <td style={{ padding: "10px 14px", color: status === "Expired" ? "#ef4444" : theme.mutedText, whiteSpace: "nowrap", fontWeight: status === "Valid" ? 400 : 600 }}>{getFoodSafetyDaysLabel(item.expiryDate)}</td>
+                                    <td style={{ padding: "10px 14px", color: theme.subtleText, whiteSpace: "nowrap" }}>{formatFoodSafetyUpdated(item.updatedAt)}</td>
+                                    <td style={{ padding: "10px 14px" }}>
+                                      <div style={{ display: "flex", gap: 5, justifyContent: "center" }}>
+                                        <button title="Edit" style={invoiceIconBtn(theme)} onClick={() => openEditFSForm(item)}>✏️</button>
+                                        <button title="Delete" style={invoiceIconBtn(theme)} onClick={() => onDeleteFoodSafetyCertification?.(item.id, item.name)}>🗑</button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Mobile cards */}
+                      <div className="fs-cards-mobile" style={{ display: "none", gap: 10 }}>
+                        {filteredSortedFS.map((item) => {
+                          const status = getFoodSafetyStatus(item.expiryDate);
+                          const accent = getFoodSafetyStatusColor(status);
+                          return (
+                            <div key={item.id} style={{ background: theme.cardBackground, border: `1px solid ${theme.cardBorder}`, borderLeft: `4px solid ${accent}`, borderRadius: 12, padding: "12px 14px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontWeight: 800, fontSize: 14, color: theme.title }}>{item.name}</div>
+                                  <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
+                                    Cert {item.certificateId || "—"}{item.employeeId ? ` · ID ${item.employeeId}` : ""}
+                                  </div>
+                                </div>
+                                <span style={getFoodSafetyBadgeStyle(status)}>{status}</span>
+                              </div>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10, fontSize: 12, color: theme.mutedText }}>
+                                <div>Issued: <strong style={{ color: theme.title }}>{formatFoodSafetyDate(item.issueDate)}</strong></div>
+                                <div>Expires: <strong style={{ color: accent }}>{formatFoodSafetyDate(item.expiryDate)}</strong></div>
+                                <div>{getFoodSafetyDaysLabel(item.expiryDate)}</div>
+                                <div>Updated: {formatFoodSafetyUpdated(item.updatedAt)}</div>
+                              </div>
+                              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                                <button style={{ ...buttonStyle(false), flex: 1 }} onClick={() => openEditFSForm(item)}>✏️ Edit</button>
+                                <button style={{ ...buttonStyle(false), flex: 1 }} onClick={() => onDeleteFoodSafetyCertification?.(item.id, item.name)}>🗑 Delete</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <EmptyState icon="🥗" title="No Food Safety certificates" description={(fsSearch || fsCertSearch || fsStatusFilter !== "All") ? "No results for your search or filter." : "Add certificates to track renewals and expiry alerts."} />
+                  )}
                 </div>
               )}
 
@@ -4563,6 +5109,58 @@ export default function AdminDashboard({
                   <button style={buttonStyle(false)} onClick={() => { setOhcFormOpen(false); resetOHCForm(); }} disabled={ohcSaving}>Cancel</button>
                   <button style={{ ...buttonStyle(true), opacity: ohcSaving ? 0.7 : 1 }} onClick={handleSaveOHC} disabled={ohcSaving}>
                     {ohcSaving ? "Saving…" : editingOHC ? "Save Changes" : "Add Certificate"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {fsFormOpen && (
+          <div style={{ position: "fixed", inset: 0, background: theme.modalOverlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2200, padding: 20 }}>
+            <div style={{ ...cardStyle(), maxWidth: 580, width: "100%", borderRadius: 18, overflow: "hidden", padding: 0 }}>
+              <div style={{ padding: "18px 24px", borderBottom: `1px solid ${theme.cardBorder}`, display: "flex", alignItems: "center", gap: 12, background: theme.softCardBackground }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(14,165,233,0.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🥗</div>
+                <div>
+                  <div style={{ fontSize: 17, fontWeight: 900, color: theme.title }}>{editingFS ? "Edit Certificate" : "Add Food Safety Certificate"}</div>
+                  <div style={{ fontSize: 12, color: theme.subtleText }}>{editingFS ? "Update certificate details" : "Add a new Basic Food Safety certification record"}</div>
+                </div>
+              </div>
+
+              <div className="form-2col" style={{ padding: "20px 24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <div>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Staff Name *</label>
+                  <input style={inputStyle()} value={fsForm.name} onChange={(e) => setFsForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Enter staff name" />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Employee ID</label>
+                  <input style={inputStyle()} value={fsForm.employeeId} onChange={(e) => setFsForm((prev) => ({ ...prev, employeeId: e.target.value }))} placeholder="Optional" />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Certificate ID *</label>
+                  <input style={inputStyle()} value={fsForm.certificateId} onChange={(e) => setFsForm((prev) => ({ ...prev, certificateId: e.target.value }))} placeholder="e.g. FS-0000" />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Issue Date</label>
+                  <input type="date" style={inputStyle()} value={fsForm.issueDate} onChange={(e) => setFsForm((prev) => ({ ...prev, issueDate: e.target.value }))} />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Expiry Date *</label>
+                  <input type="date" style={inputStyle()} value={fsForm.expiryDate} onChange={(e) => setFsForm((prev) => ({ ...prev, expiryDate: e.target.value }))} />
+                  <div style={{ marginTop: 6, fontSize: 11, color: theme.subtleText }}>Default 02 Jul 2028 — change if needed.</div>
+                </div>
+              </div>
+
+              <div style={{ padding: "14px 24px", borderTop: `1px solid ${theme.cardBorder}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: theme.softCardBackground }}>
+                <div>{editingFS && <button style={dangerButtonStyle()} onClick={handleDeleteFSInsideForm}>🗑 Delete</button>}</div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button style={buttonStyle(false)} onClick={() => { setFsFormOpen(false); resetFSForm(); }} disabled={fsSaving}>Cancel</button>
+                  <button style={{ ...buttonStyle(true), opacity: fsSaving ? 0.7 : 1 }} onClick={handleSaveFS} disabled={fsSaving}>
+                    {fsSaving ? "Saving…" : editingFS ? "Save Changes" : "Add Certificate"}
                   </button>
                 </div>
               </div>

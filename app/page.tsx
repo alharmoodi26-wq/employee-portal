@@ -129,6 +129,16 @@ type OHCCertificationEntry = {
   applied?: boolean;
 };
 
+type FoodSafetyCertificationEntry = {
+  id: string;
+  name: string;
+  employeeId?: string;
+  certificateId: string;
+  issueDate: string;
+  expiryDate: string;
+  updatedAt?: string;
+};
+
 type InvoiceStatus = "Approved" | "Pending Review" | "Paid";
 
 type ExtractionStatus = "ready_for_review" | "pending_review" | "failed" | "duplicate";
@@ -557,6 +567,7 @@ export default function HomePage() {
   const [birthdayCardSettings, setBirthdayCardSettings] =
     useState<BirthdayCardSettings>(DEFAULT_BIRTHDAY_CARD_SETTINGS);
   const [ohcCertifications, setOhcCertifications] = useState<OHCCertificationEntry[]>([]);
+  const [foodSafetyCertifications, setFoodSafetyCertifications] = useState<FoodSafetyCertificationEntry[]>([]);
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [assessmentSubmissions, setAssessmentSubmissions] = useState<AssessmentSubmission[]>([]);
@@ -574,6 +585,7 @@ export default function HomePage() {
   const [loadingAttendance, setLoadingAttendance] = useState(true);
   const [loadingBirthdays, setLoadingBirthdays] = useState(true);
   const [loadingOHC, setLoadingOHC] = useState(true);
+  const [loadingFoodSafety, setLoadingFoodSafety] = useState(true);
   const [loadingInvoices, setLoadingInvoices] = useState(true);
   const [themeMode, setThemeModeState] = useState<ThemeMode>("light");
   const [themeReady, setThemeReady] = useState(true);
@@ -665,6 +677,7 @@ export default function HomePage() {
           setUsers([]);
           setBirthdays([]);
           setOhcCertifications([]);
+          setFoodSafetyCertifications([]);
           setInvoices([]);
           setAssessments([]);
           setAssessmentSubmissions([]);
@@ -1065,6 +1078,54 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!currentUser) {
+      setFoodSafetyCertifications([]);
+      setLoadingFoodSafety(false);
+      return;
+    }
+
+    setLoadingFoodSafety(true);
+
+    const unsubscribe = onSnapshot(
+      query(collection(db, "foodSafetyCertifications"), orderBy("createdAt", "desc")),
+      (snapshot) => {
+        try {
+          const items = snapshot.docs.map((document) => {
+            const data = document.data();
+            const updatedRaw = data.updatedAt;
+            let updatedAt = "";
+            if (updatedRaw && typeof updatedRaw.toDate === "function") {
+              updatedAt = updatedRaw.toDate().toISOString();
+            } else if (typeof updatedRaw === "string") {
+              updatedAt = updatedRaw;
+            }
+            return {
+              id: document.id,
+              name: data.name ?? "",
+              employeeId: data.employeeId ?? "",
+              certificateId: data.certificateId ?? "",
+              issueDate: data.issueDate ?? "",
+              expiryDate: data.expiryDate ?? "",
+              updatedAt,
+            } as FoodSafetyCertificationEntry;
+          });
+          setFoodSafetyCertifications(items);
+          setLoadingFoodSafety(false);
+        } catch (error) {
+          console.error("Error mapping Food Safety certifications:", error);
+          setLoadingFoodSafety(false);
+        }
+      },
+      (error) => {
+        console.error("Error loading Food Safety certifications:", error);
+        setLoadingFoodSafety(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) {
       setInvoices([]);
       setLoadingInvoices(false);
       return;
@@ -1428,6 +1489,7 @@ export default function HomePage() {
       setUsers([]);
       setBirthdays([]);
       setOhcCertifications([]);
+      setFoodSafetyCertifications([]);
       setInvoices([]);
       setAssessments([]);
       setAssessmentSubmissions([]);
@@ -2169,6 +2231,63 @@ export default function HomePage() {
     });
   };
 
+  const addFoodSafetyCertification = async (payload: {
+    name: string;
+    employeeId?: string;
+    certificateId: string;
+    issueDate: string;
+    expiryDate: string;
+  }) => {
+    await addDoc(collection(db, "foodSafetyCertifications"), {
+      name: payload.name,
+      employeeId: payload.employeeId ?? "",
+      certificateId: payload.certificateId,
+      issueDate: payload.issueDate,
+      expiryDate: payload.expiryDate,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const updateFoodSafetyCertification = async (
+    certificationId: string,
+    payload: {
+      name: string;
+      employeeId?: string;
+      certificateId: string;
+      issueDate: string;
+      expiryDate: string;
+    }
+  ) => {
+    const refDoc = doc(db, "foodSafetyCertifications", certificationId);
+    await updateDoc(refDoc, {
+      name: payload.name,
+      employeeId: payload.employeeId ?? "",
+      certificateId: payload.certificateId,
+      issueDate: payload.issueDate,
+      expiryDate: payload.expiryDate,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const deleteFoodSafetyCertification = async (certificationId: string, employeeName: string) => {
+    setConfirmState({
+      open: true,
+      title: "Delete Food Safety certificate",
+      message: `Are you sure you want to delete the Basic Food Safety certificate for ${employeeName}?`,
+      onConfirm: async () => {
+        try {
+          const refDoc = doc(db, "foodSafetyCertifications", certificationId);
+          await deleteDoc(refDoc);
+          showToast("success", "Food Safety certificate deleted successfully.");
+        } catch (error) {
+          console.error(error);
+          showToast("error", "Error deleting Food Safety certificate.");
+        }
+      },
+    });
+  };
+
   const submitTask = async (id: string, submittedNotes: string, submittedFiles: File[]) => {
     const taskDoc = assignedTasks.find((task) => task.id === id);
     const ownerId = taskDoc?.employeeUid || currentUser?.uid || "unknown-user";
@@ -2673,6 +2792,7 @@ export default function HomePage() {
           birthdayCardSettings={birthdayCardSettings}
           onSaveBirthdayCardSettings={saveBirthdayCardSettings}
           ohcCertifications={ohcCertifications}
+          foodSafetyCertifications={foodSafetyCertifications}
           invoices={invoices}
           worksHasMore={worksHasMore}
           tasksHasMore={tasksHasMore}
@@ -2694,6 +2814,9 @@ export default function HomePage() {
           onUpdateOHCCertification={updateOHCCertification}
           onDeleteOHCCertification={deleteOHCCertification}
           onSetOHCApplied={setOHCApplied}
+          onAddFoodSafetyCertification={addFoodSafetyCertification}
+          onUpdateFoodSafetyCertification={updateFoodSafetyCertification}
+          onDeleteFoodSafetyCertification={deleteFoodSafetyCertification}
           onUpdateInvoice={updateInvoice}
           onApproveInvoice={approveInvoice}
           onOpenInvoiceAttachment={openInvoiceAttachment}

@@ -83,9 +83,14 @@ html {
 /* ─── Stat grids ─────────────────────────────────────── */
 .stat-grid-3col    { grid-template-columns: repeat(3, 1fr); }
 .stat-grid-5col    { grid-template-columns: repeat(5, 1fr); }
-.hr-overview-grid  { grid-template-columns: repeat(3, 1fr); }
+.hr-overview-grid  { grid-template-columns: repeat(4, 1fr); }
 .ohc-stats-grid    { grid-template-columns: repeat(4, 1fr); }
+.fs-stats-grid     { grid-template-columns: repeat(4, 1fr); }
 .birthday-grid     { grid-template-columns: repeat(3, 1fr); }
+
+/* ─── Food Safety Certificate Monitoring ─────────────── */
+.fs-table-desktop { display: block; }
+.fs-cards-mobile  { display: none !important; }
 
 /* ─── 2-column form grids ────────────────────────────── */
 .form-2col { grid-template-columns: 1fr 1fr; }
@@ -125,6 +130,13 @@ html {
   .stat-grid-5col         { grid-template-columns: repeat(2, 1fr) !important; }
   .hr-overview-grid       { grid-template-columns: 1fr !important; }
   .ohc-stats-grid         { grid-template-columns: repeat(2, 1fr) !important; }
+  .fs-stats-grid          { grid-template-columns: repeat(2, 1fr) !important; }
+  .fs-action-bar          { flex-wrap: wrap !important; }
+  .fs-action-bar input,
+  .fs-action-bar select   { width: 100% !important; flex: none !important; }
+  .fs-action-bar button   { flex: 1 1 auto !important; min-width: 0 !important; }
+  .fs-table-desktop       { display: none !important; }
+  .fs-cards-mobile        { display: grid !important; }
   .birthday-grid          { grid-template-columns: 1fr !important; }
   .birthday-header        { flex-wrap: wrap !important; }
   .birthday-print-btn     { width: 100% !important; order: 2 !important; }
@@ -240,6 +252,8 @@ html {
   .stat-grid-main    { grid-template-columns: repeat(3, 1fr) !important; }
   .stat-grid-5col    { grid-template-columns: repeat(3, 1fr) !important; }
   .ohc-stats-grid    { grid-template-columns: repeat(2, 1fr) !important; }
+  .fs-stats-grid     { grid-template-columns: repeat(2, 1fr) !important; }
+  .hr-overview-grid  { grid-template-columns: repeat(2, 1fr) !important; }
   .two-col-split     { grid-template-columns: 1fr !important; }
   .employee-grid     { grid-template-columns: repeat(2, 1fr) !important; }
   .invoice-stats-grid{ grid-template-columns: repeat(3, 1fr) !important; }
