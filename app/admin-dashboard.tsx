@@ -4360,7 +4360,7 @@ export default function AdminDashboard({
                           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                             <thead>
                               <tr style={{ background: theme.softCardBackground }}>
-                                {["Staff Name", "Employee ID", "Certificate ID", "Issue Date", "Expiry Date", "Status", "Days Remaining", "Last Updated", "Actions"].map((h) => (
+                                {["Staff Name", "Certificate ID", "Issue Date", "Expiry Date", "Status", "Days Remaining", "Actions"].map((h) => (
                                   <th key={h} style={{ textAlign: h === "Status" || h === "Actions" ? "center" : "left", padding: "11px 14px", fontSize: 11, fontWeight: 700, color: theme.subtleText, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderBottom: `1px solid ${theme.cardBorder}` }}>{h}</th>
                                 ))}
                               </tr>
@@ -4371,15 +4371,13 @@ export default function AdminDashboard({
                                 const accent = getFoodSafetyStatusColor(status);
                                 return (
                                   <tr key={item.id} style={{ borderBottom: `1px solid ${theme.cardBorder}` }}>
-                                    <td style={{ padding: "10px 14px", fontWeight: 700, color: theme.title, whiteSpace: "nowrap" }}>{item.name}</td>
-                                    <td style={{ padding: "10px 14px", color: theme.mutedText }}>{item.employeeId || "—"}</td>
+                                    <td style={{ padding: "10px 14px", fontWeight: 700, color: theme.title }}>{item.name}</td>
                                     <td style={{ padding: "10px 14px", color: theme.mutedText, fontWeight: 600 }}>{item.certificateId || "—"}</td>
                                     <td style={{ padding: "10px 14px", color: theme.mutedText, whiteSpace: "nowrap" }}>{formatFoodSafetyDate(item.issueDate)}</td>
                                     <td style={{ padding: "10px 14px", color: accent, fontWeight: 700, whiteSpace: "nowrap" }}>{formatFoodSafetyDate(item.expiryDate)}</td>
                                     <td style={{ padding: "10px 14px", textAlign: "center" }}><span style={getFoodSafetyBadgeStyle(status)}>{status}</span></td>
                                     <td style={{ padding: "10px 14px", color: status === "Expired" ? "#ef4444" : theme.mutedText, whiteSpace: "nowrap", fontWeight: status === "Valid" ? 400 : 600 }}>{getFoodSafetyDaysLabel(item.expiryDate)}</td>
-                                    <td style={{ padding: "10px 14px", color: theme.subtleText, whiteSpace: "nowrap" }}>{formatFoodSafetyUpdated(item.updatedAt)}</td>
-                                    <td style={{ padding: "10px 14px" }}>
+                                    <td style={{ padding: "10px 14px", width: 1, whiteSpace: "nowrap" }}>
                                       <div style={{ display: "flex", gap: 5, justifyContent: "center" }}>
                                         <button title="Edit" style={invoiceIconBtn(theme)} onClick={() => openEditFSForm(item)}>✏️</button>
                                         <button title="Delete" style={invoiceIconBtn(theme)} onClick={() => onDeleteFoodSafetyCertification?.(item.id, item.name)}>🗑</button>
@@ -4404,7 +4402,7 @@ export default function AdminDashboard({
                                 <div style={{ minWidth: 0 }}>
                                   <div style={{ fontWeight: 800, fontSize: 14, color: theme.title }}>{item.name}</div>
                                   <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
-                                    Cert {item.certificateId || "—"}{item.employeeId ? ` · ID ${item.employeeId}` : ""}
+                                    Cert {item.certificateId || "—"}
                                   </div>
                                 </div>
                                 <span style={getFoodSafetyBadgeStyle(status)}>{status}</span>
@@ -4412,8 +4410,7 @@ export default function AdminDashboard({
                               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10, fontSize: 12, color: theme.mutedText }}>
                                 <div>Issued: <strong style={{ color: theme.title }}>{formatFoodSafetyDate(item.issueDate)}</strong></div>
                                 <div>Expires: <strong style={{ color: accent }}>{formatFoodSafetyDate(item.expiryDate)}</strong></div>
-                                <div>{getFoodSafetyDaysLabel(item.expiryDate)}</div>
-                                <div>Updated: {formatFoodSafetyUpdated(item.updatedAt)}</div>
+                                <div style={{ gridColumn: "1 / -1" }}>{getFoodSafetyDaysLabel(item.expiryDate)}</div>
                               </div>
                               <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                                 <button style={{ ...buttonStyle(false), flex: 1 }} onClick={() => openEditFSForm(item)}>✏️ Edit</button>
