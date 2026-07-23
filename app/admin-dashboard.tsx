@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import {
   Assessment,
@@ -384,11 +384,26 @@ function formatFoodSafetyDate(dateString: string) {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function formatFoodSafetyUpdated(iso?: string) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+// Normalize a person's name for matching: lowercase, strip punctuation
+// (so "Jr." == "Jr"), collapse and trim whitespace.
+function fsNormalizeName(name: string): string {
+  return String(name || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Professional fallback avatar (initials on the EIHG navy) as an inline
+// SVG data URI — never a broken-image icon, works in the table and the PDF.
+function fsInitialsAvatar(name: string): string {
+  const tokens = fsNormalizeName(name).split(" ").filter(Boolean);
+  const initials = (
+    (tokens[0]?.[0] || "") + (tokens.length > 1 ? tokens[tokens.length - 1][0] : "")
+  ).toUpperCase() || "?";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" rx="50" fill="#0f1c35"/><text x="50" y="50" dy="0.35em" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="#F0C040">${initials}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
 function formatFilesLabel(files: File[]) {
@@ -1233,6 +1248,54 @@ export default function AdminDashboard({
       });
   }, [foodSafetyCertifications, fsSearch, fsCertSearch, fsStatusFilter, fsSort]);
 
+  // ── Employee photo lookup — built ONCE from the existing HR photo
+  //    sources (OHC headshots, birthday photos, employee profile photos).
+  //    No new photo storage; we only reuse links that already exist.
+  const fsPhotoIndex = useMemo(() => {
+    const byExact = new Map<string, string>();
+    const entries: { norm: string; tokens: string[]; photo: string }[] = [];
+    const add = (rawName?: string, photo?: string) => {
+      const name = rawName || "";
+      const url = (photo || "").trim();
+      if (!name || !url) return;
+      const norm = fsNormalizeName(name);
+      if (!norm) return;
+      if (!byExact.has(norm)) byExact.set(norm, url);
+      entries.push({ norm, tokens: norm.split(" ").filter(Boolean), photo: url });
+    };
+    ohcCertifications.forEach((o) => add(o.name, o.employeePhotoLink));
+    birthdays.forEach((b) => add(b.name, b.photoLink));
+    employees.forEach((e) => add(e.name, e.profilePhotoUrl));
+    return { byExact, entries };
+  }, [ohcCertifications, birthdays, employees]);
+
+  // Resolve a certificate's staff name to an employee photo URL.
+  // Exact normalized match first; otherwise a careful fuzzy match that only
+  // returns a photo when exactly ONE distinct person is a confident match.
+  const getFSPhoto = useCallback(
+    (name: string): string => {
+      const norm = fsNormalizeName(name);
+      if (!norm) return "";
+      const exact = fsPhotoIndex.byExact.get(norm);
+      if (exact) return exact;
+
+      const certTokens = norm.split(" ").filter(Boolean);
+      if (certTokens.length < 2) return ""; // too little to fuzzy-match safely
+      const certSet = new Set(certTokens);
+      const candidatePhotos = new Set<string>();
+      for (const e of fsPhotoIndex.entries) {
+        const candSet = new Set(e.tokens);
+        let overlap = 0;
+        for (const t of certSet) if (candSet.has(t)) overlap += 1;
+        const subset =
+          certTokens.every((t) => candSet.has(t)) || e.tokens.every((t) => certSet.has(t));
+        if (overlap >= 2 && subset) candidatePhotos.add(e.photo);
+      }
+      return candidatePhotos.size === 1 ? [...candidatePhotos][0] : "";
+    },
+    [fsPhotoIndex]
+  );
+
   const bdDaysUntil = (bStr: string): number => {
     if (!bStr) return 999;
     const today = new Date();
@@ -1725,9 +1788,11 @@ export default function AdminDashboard({
     thead th{padding:11px 12px;text-align:left;font-weight:700;font-size:11px;letter-spacing:.05em;color:#F0C040}
     thead th:first-child{text-align:center}
     tbody td{border-bottom:1px solid #e5e7eb;vertical-align:middle}
+    .emp-photo{width:42px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;display:block;margin:0 auto;background:#f3f4f6}
     .footer{margin-top:30px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
     .no-print{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:8px;padding:10px 20px;background:#fff;border-bottom:1px solid #e5e7eb;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
-    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}table{box-shadow:none}}
+    .no-print button[disabled]{opacity:0.55;cursor:not-allowed}
+    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}table{box-shadow:none}.emp-photo{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
   </style>
 </head>
 <body>
@@ -2131,22 +2196,24 @@ export default function AdminDashboard({
       const s = String(value ?? "");
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
+    // CSV cannot embed images, so the photo column carries the existing
+    // Storage URL (or "No Photo" when unmatched) — never a duplicate upload.
     const header = [
-      "#", "Staff Name", "Employee ID", "Certificate ID", "Issue Date",
-      "Expiry Date", "Status", "Days Remaining", "Last Updated",
+      "#", "Employee Photo", "Staff Name", "Certificate ID", "Issue Date",
+      "Expiry Date", "Status", "Days Remaining",
     ];
     const lines = [header.map(csvCell).join(",")];
     sorted.forEach((item, idx) => {
+      const photo = getFSPhoto(item.name);
       lines.push([
         idx + 1,
+        photo || "No Photo",
         item.name,
-        item.employeeId || "",
         item.certificateId || "",
         item.issueDate || "",
         item.expiryDate || "",
         getFoodSafetyStatus(item.expiryDate),
         getFoodSafetyDaysLabel(item.expiryDate),
-        formatFoodSafetyUpdated(item.updatedAt),
       ].map(csvCell).join(","));
     });
     const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
@@ -2183,10 +2250,13 @@ export default function AdminDashboard({
       const sc = statusColor(status);
       const sb = statusBg(status);
       const rowBg = idx % 2 === 0 ? "#ffffff" : "#f8fafc";
+      const avatar = fsInitialsAvatar(item.name);
+      const photoUrl = safeUrl(getFSPhoto(item.name)) || avatar;
+      const photo = `<img class="emp-photo" src="${photoUrl}" alt="${escHtml(item.name)}" onerror="this.onerror=null;this.src='${avatar}'" />`;
       return `<tr style="background:${rowBg}">
         <td style="text-align:center;color:#9ca3af;font-size:11px;padding:8px 6px">${idx + 1}</td>
+        <td style="padding:8px 10px;text-align:center">${photo}</td>
         <td style="padding:8px 12px;font-weight:700;font-size:13px;color:#1e293b">${escHtml(item.name)}</td>
-        <td style="padding:8px 12px;font-size:12px;color:#6b7280">${escHtml(item.employeeId || "—")}</td>
         <td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600">${escHtml(item.certificateId || "—")}</td>
         <td style="padding:8px 12px;font-size:12px;color:#6b7280;white-space:nowrap">${escHtml(formatFoodSafetyDate(item.issueDate))}</td>
         <td style="padding:8px 12px;font-size:13px;font-weight:600;color:#374151;white-space:nowrap">${escHtml(formatFoodSafetyDate(item.expiryDate))}</td>
@@ -2202,7 +2272,7 @@ export default function AdminDashboard({
 <head>
   <meta charset="utf-8"/>
   <title>Basic Food Safety Certificates Report — EIHG</title>
-  <style>
+  <style id="fs-report-style">
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Segoe UI',Arial,sans-serif;color:#111827;background:#f9fafb}
     .page{max-width:1060px;margin:0 auto;padding:40px 32px}
@@ -2222,15 +2292,18 @@ export default function AdminDashboard({
     thead th{padding:11px 12px;text-align:left;font-weight:700;font-size:11px;letter-spacing:.05em;color:#F0C040}
     thead th:first-child{text-align:center}
     tbody td{border-bottom:1px solid #e5e7eb;vertical-align:middle}
+    .emp-photo{width:42px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;display:block;margin:0 auto;background:#f3f4f6}
     .footer{margin-top:30px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
     .no-print{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:8px;padding:10px 20px;background:#fff;border-bottom:1px solid #e5e7eb;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
-    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}table{box-shadow:none}}
+    .no-print button[disabled]{opacity:0.55;cursor:not-allowed}
+    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}table{box-shadow:none}.emp-photo{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
   </style>
 </head>
 <body>
 <div class="no-print">
   <button onclick="window.close()" style="padding:8px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,#0f1c35,#1b2a4a);color:#F0C040;cursor:pointer;font-size:13px;font-weight:700">← Back to Portal</button>
-  <button onclick="window.print()" style="padding:8px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#1e293b;cursor:pointer;font-size:13px;font-weight:700">🖨 Print / Save as PDF</button>
+  <button id="printBtn" disabled onclick="window.print()" style="padding:8px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#1e293b;cursor:pointer;font-size:13px;font-weight:700">⏳ Loading photos…</button>
+  <span id="loadStatus" style="font-size:11px;color:#9ca3af">Preparing employee photos…</span>
 </div>
 <div class="page">
   <div class="header">
@@ -2274,9 +2347,9 @@ export default function AdminDashboard({
     <thead>
       <tr>
         <th style="width:36px;text-align:center">#</th>
+        <th style="width:64px;text-align:center">Photo</th>
         <th>Staff Name</th>
-        <th style="width:110px">Employee ID</th>
-        <th style="width:130px">Certificate ID</th>
+        <th style="width:150px">Certificate ID</th>
         <th style="width:110px">Issue Date</th>
         <th style="width:110px">Expiry Date</th>
         <th style="width:120px;text-align:center">Status</th>
@@ -2293,6 +2366,24 @@ export default function AdminDashboard({
     <span>Generated: ${new Date().toLocaleString()}</span>
   </div>
 </div>
+<script>
+  (function () {
+    var imgs = Array.prototype.slice.call(document.images);
+    var btn = document.getElementById('printBtn');
+    var status = document.getElementById('loadStatus');
+    var total = imgs.length, done = 0;
+    function ready() {
+      if (btn) { btn.disabled = false; btn.textContent = '🖨 Print / Save as PDF'; }
+      if (status) { status.textContent = total + ' photo' + (total === 1 ? '' : 's') + ' ready'; }
+    }
+    function tick() { done += 1; if (status) status.textContent = 'Loading photos… ' + done + '/' + total; if (done >= total) ready(); }
+    if (total === 0) { ready(); return; }
+    imgs.forEach(function (im) {
+      if (im.complete) { tick(); }
+      else { im.addEventListener('load', tick); im.addEventListener('error', tick); }
+    });
+  })();
+</script>
 </body>
 </html>`);
     popup.document.close();
@@ -4369,9 +4460,23 @@ export default function AdminDashboard({
                               {filteredSortedFS.map((item) => {
                                 const status = getFoodSafetyStatus(item.expiryDate);
                                 const accent = getFoodSafetyStatusColor(status);
+                                const photo = getFSPhoto(item.name);
+                                const avatar = fsInitialsAvatar(item.name);
                                 return (
                                   <tr key={item.id} style={{ borderBottom: `1px solid ${theme.cardBorder}` }}>
-                                    <td style={{ padding: "10px 14px", fontWeight: 700, color: theme.title }}>{item.name}</td>
+                                    <td style={{ padding: "10px 14px", fontWeight: 700, color: theme.title }}>
+                                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                        <img
+                                          src={photo || avatar}
+                                          alt={item.name}
+                                          width={34} height={34}
+                                          loading="lazy" decoding="async"
+                                          onError={(e) => { if (e.currentTarget.src !== avatar) e.currentTarget.src = avatar; }}
+                                          style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", flexShrink: 0, border: `1px solid ${theme.cardBorder}`, background: theme.softCardBackground }}
+                                        />
+                                        <span>{item.name}</span>
+                                      </div>
+                                    </td>
                                     <td style={{ padding: "10px 14px", color: theme.mutedText, fontWeight: 600 }}>{item.certificateId || "—"}</td>
                                     <td style={{ padding: "10px 14px", color: theme.mutedText, whiteSpace: "nowrap" }}>{formatFoodSafetyDate(item.issueDate)}</td>
                                     <td style={{ padding: "10px 14px", color: accent, fontWeight: 700, whiteSpace: "nowrap" }}>{formatFoodSafetyDate(item.expiryDate)}</td>
@@ -4396,13 +4501,25 @@ export default function AdminDashboard({
                         {filteredSortedFS.map((item) => {
                           const status = getFoodSafetyStatus(item.expiryDate);
                           const accent = getFoodSafetyStatusColor(status);
+                          const photo = getFSPhoto(item.name);
+                          const avatar = fsInitialsAvatar(item.name);
                           return (
                             <div key={item.id} style={{ background: theme.cardBackground, border: `1px solid ${theme.cardBorder}`, borderLeft: `4px solid ${accent}`, borderRadius: 12, padding: "12px 14px" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-                                <div style={{ minWidth: 0 }}>
-                                  <div style={{ fontWeight: 800, fontSize: 14, color: theme.title }}>{item.name}</div>
-                                  <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
-                                    Cert {item.certificateId || "—"}
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                  <img
+                                    src={photo || avatar}
+                                    alt={item.name}
+                                    width={38} height={38}
+                                    loading="lazy" decoding="async"
+                                    onError={(e) => { if (e.currentTarget.src !== avatar) e.currentTarget.src = avatar; }}
+                                    style={{ width: 38, height: 38, borderRadius: "50%", objectFit: "cover", flexShrink: 0, border: `1px solid ${theme.cardBorder}`, background: theme.softCardBackground }}
+                                  />
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontWeight: 800, fontSize: 14, color: theme.title }}>{item.name}</div>
+                                    <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
+                                      Cert {item.certificateId || "—"}
+                                    </div>
                                   </div>
                                 </div>
                                 <span style={getFoodSafetyBadgeStyle(status)}>{status}</span>
