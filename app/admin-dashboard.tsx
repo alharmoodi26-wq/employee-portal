@@ -1314,7 +1314,7 @@ export default function AdminDashboard({
 
   const sortedBirthdays = useMemo(() =>
     [...birthdays]
-      .filter(b => !bdSearch.trim() || b.name.toLowerCase().includes(bdSearch.trim().toLowerCase()))
+      .filter(b => !bdSearch.trim() || b.name.trim().toLowerCase().startsWith(bdSearch.trim().toLowerCase()))
       .sort((a, b) => bdDaysUntil(a.birthday) - bdDaysUntil(b.birthday)),
   [birthdays, bdSearch]);
 
