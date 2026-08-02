@@ -181,6 +181,10 @@ type AdminDashboardProps = {
     gender?: "male" | "female";
   }) => Promise<void>;
   onUpdateBirthdayPhoto: (birthdayId: string, file: File) => Promise<void>;
+  onUpdateBirthday?: (
+    birthdayId: string,
+    payload: { name: string; birthday: string; gender?: "male" | "female"; photo?: File | null }
+  ) => Promise<void>;
   onDeleteBirthday: (birthdayId: string, birthdayName: string) => Promise<void>;
   onAddOHCCertification?: (payload: {
     name: string;
@@ -971,6 +975,7 @@ export default function AdminDashboard({
   onAssignTask,
   onAddBirthday,
   onUpdateBirthdayPhoto,
+  onUpdateBirthday,
   onDeleteBirthday,
   onAddOHCCertification,
   onUpdateOHCCertification,
@@ -1061,6 +1066,34 @@ export default function AdminDashboard({
 
   const [showBirthdayMenu, setShowBirthdayMenu] = useState(false);
   const [showBirthdayModal, setShowBirthdayModal] = useState(false);
+  // Birthday card "⋮ More" dropdown (fixed-positioned; only one open at a time)
+  // and the entry currently being edited (null = Add mode).
+  const [bdMenu, setBdMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [editingBirthday, setEditingBirthday] = useState<BirthdayEntry | null>(null);
+
+  // Close the birthday "⋮" menu on scroll / resize / Escape so it never drifts
+  // away from its card or lingers.
+  useEffect(() => {
+    if (!bdMenu) return;
+    const close = () => setBdMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setBdMenu(null); };
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [bdMenu]);
+
+  const openBdMenu = (e: React.MouseEvent<HTMLButtonElement>, id: string) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const menuW = 224;
+    const x = Math.max(8, Math.min(r.right - menuW, window.innerWidth - menuW - 8));
+    const y = Math.min(r.bottom + 6, window.innerHeight - 230);
+    setBdMenu((prev) => (prev && prev.id === id ? null : { id, x, y }));
+  };
   const [cardPerson, setCardPerson] = useState<BirthdayPerson | null>(null);
   const [showCardSettings, setShowCardSettings] = useState(false);
   // Replace-photo for an existing birthday entry.
@@ -2460,7 +2493,25 @@ export default function AdminDashboard({
     }
   };
 
-  const handleAddBirthday = async () => {
+  const resetBirthdayForm = () => {
+    setBirthdayForm({ name: "", birthday: "", photoName: "", gender: "" });
+    setBirthdayPhoto(null);
+    setEditingBirthday(null);
+  };
+
+  const openEditBirthday = (item: BirthdayEntry) => {
+    setEditingBirthday(item);
+    setBirthdayPhoto(null);
+    setBirthdayForm({
+      name: item.name,
+      birthday: item.birthday,
+      photoName: "",
+      gender: item.gender ?? "",
+    });
+    setShowBirthdayModal(true);
+  };
+
+  const handleSaveBirthday = async () => {
     if (!birthdayForm.name || !birthdayForm.birthday) {
       showToast("error", "Please enter the employee name and birthday date.");
       return;
@@ -2468,26 +2519,31 @@ export default function AdminDashboard({
 
     try {
       setBirthdaySaving(true);
-      await onAddBirthday({
-        name: birthdayForm.name,
-        birthday: birthdayForm.birthday,
-        photo: birthdayPhoto,
-        gender: birthdayForm.gender || undefined,
-      });
 
-      setBirthdayForm({
-        name: "",
-        birthday: "",
-        photoName: "",
-        gender: "",
-      });
-      setBirthdayPhoto(null);
+      if (editingBirthday && onUpdateBirthday) {
+        await onUpdateBirthday(editingBirthday.id, {
+          name: birthdayForm.name,
+          birthday: birthdayForm.birthday,
+          gender: birthdayForm.gender || undefined,
+          photo: birthdayPhoto,
+        });
+        showToast("success", "Employee details updated successfully.");
+      } else {
+        await onAddBirthday({
+          name: birthdayForm.name,
+          birthday: birthdayForm.birthday,
+          photo: birthdayPhoto,
+          gender: birthdayForm.gender || undefined,
+        });
+        showToast("success", "Birthday added successfully.");
+      }
+
+      resetBirthdayForm();
       setShowBirthdayModal(false);
       setShowBirthdayMenu(false);
-      showToast("success", "Birthday added successfully.");
     } catch (error) {
       console.error(error);
-      showToast("error", "Error adding birthday.");
+      showToast("error", editingBirthday ? "Error updating employee details." : "Error adding birthday.");
     } finally {
       setBirthdaySaving(false);
     }
@@ -4573,7 +4629,7 @@ export default function AdminDashboard({
                       <div style={{ flex: 1 }} />
                       <button className="birthday-print-btn" style={buttonStyle(false)} onClick={() => setShowCardSettings(true)} title="Birthday card settings">⚙ Card Settings</button>
                       <button className="birthday-print-btn" style={buttonStyle(false)} onClick={handlePrintBirthdayReport}>🖨 Print Report</button>
-                      <button className="birthday-add-btn" style={buttonStyle(true)} onClick={() => setShowBirthdayModal(true)}>+ Add Birthday</button>
+                      <button className="birthday-add-btn" style={buttonStyle(true)} onClick={() => { resetBirthdayForm(); setShowBirthdayModal(true); }}>+ Add Birthday</button>
                     </div>
                     <input
                       type="text"
@@ -4670,27 +4726,18 @@ export default function AdminDashboard({
                                   }}
                                 >🎉</button>
                                 <button
-                                  title={item.photoLink ? "Change photo (upload higher quality)" : "Upload photo"}
-                                  disabled={bdPhotoUploadingId === item.id}
+                                  title="More actions"
+                                  aria-haspopup="menu"
+                                  aria-expanded={bdMenu?.id === item.id}
                                   style={{
                                     ...invoiceIconBtn(theme),
-                                    color: "#6366f1",
+                                    color: theme.mutedText,
+                                    background: bdMenu?.id === item.id ? theme.softCardBackground : (invoiceIconBtn(theme).background as string),
                                     opacity: bdPhotoUploadingId === item.id ? 0.5 : 1,
                                     cursor: bdPhotoUploadingId === item.id ? "progress" : "pointer",
                                   }}
-                                  onClick={() => {
-                                    bdPhotoTargetId.current = item.id;
-                                    bdPhotoInputRef.current?.click();
-                                  }}
-                                >{bdPhotoUploadingId === item.id ? "⏳" : "📷"}</button>
-                                {item.photoLink && (
-                                  <button title="View Photo" style={invoiceIconBtn(theme)} onClick={() => setBirthdayPreview({ title: `${item.name} — Birthday Photo`, image: item.photoLink! })}>🖼</button>
-                                )}
-                                <button
-                                  title="Delete"
-                                  style={{ ...invoiceIconBtn(theme), color: "#ef4444" }}
-                                  onClick={() => onDeleteBirthday(item.id, item.name)}
-                                >🗑</button>
+                                  onClick={(e) => openBdMenu(e, item.id)}
+                                >{bdPhotoUploadingId === item.id ? "⏳" : "⋮"}</button>
                               </div>
                             </div>
                           </div>
@@ -4990,14 +5037,55 @@ export default function AdminDashboard({
           </div>
         )}
 
+        {bdMenu && (() => {
+          const item = birthdays.find((b) => b.id === bdMenu.id);
+          if (!item) return null;
+          const itemBtn = (extra?: React.CSSProperties): React.CSSProperties => ({
+            display: "flex", alignItems: "center", gap: 10, width: "100%",
+            padding: "10px 14px", background: "transparent", border: "none",
+            cursor: "pointer", fontSize: 13, fontWeight: 600, textAlign: "left",
+            color: theme.title, ...extra,
+          });
+          return (
+            <>
+              <div onClick={() => setBdMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "transparent" }} />
+              <div role="menu" style={{
+                position: "fixed", top: bdMenu.y, left: bdMenu.x, zIndex: 4001,
+                minWidth: 224, background: theme.cardBackground, border: `1px solid ${theme.cardBorder}`,
+                borderRadius: 12, boxShadow: "0 12px 30px rgba(15,23,42,0.18)", overflow: "hidden", padding: "6px 0",
+              }}>
+                <button role="menuitem" style={itemBtn()}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = theme.softCardBackground)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  onClick={() => { setBdMenu(null); openEditBirthday(item); }}>✏️ <span>Edit Employee Details</span></button>
+                <button role="menuitem" style={itemBtn()}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = theme.softCardBackground)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  onClick={() => { setBdMenu(null); bdPhotoTargetId.current = item.id; bdPhotoInputRef.current?.click(); }}>📷 <span>Change Employee Photo</span></button>
+                {item.photoLink && (
+                  <button role="menuitem" style={itemBtn()}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = theme.softCardBackground)}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    onClick={() => { setBdMenu(null); setBirthdayPreview({ title: `${item.name} — Birthday Photo`, image: item.photoLink! }); }}>🖼 <span>View Employee Photo</span></button>
+                )}
+                <div style={{ height: 1, background: theme.cardBorder, margin: "6px 0" }} />
+                <button role="menuitem" style={itemBtn({ color: "#ef4444" })}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.08)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  onClick={() => { setBdMenu(null); onDeleteBirthday(item.id, item.name); }}>🗑 <span>Delete Employee</span></button>
+              </div>
+            </>
+          );
+        })()}
+
         {showBirthdayModal && (
           <div style={{ position: "fixed", inset: 0, background: theme.modalOverlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000, padding: 20 }}>
             <div style={{ ...cardStyle(), maxWidth: 480, width: "100%", borderRadius: 18, overflow: "hidden", padding: 0 }}>
               <div style={{ padding: "18px 24px", borderBottom: `1px solid ${theme.cardBorder}`, display: "flex", alignItems: "center", gap: 12, background: theme.softCardBackground }}>
-                <div style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(236,72,153,0.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🎂</div>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(236,72,153,0.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{editingBirthday ? "✏️" : "🎂"}</div>
                 <div>
-                  <div style={{ fontSize: 17, fontWeight: 900, color: theme.title }}>Add Birthday</div>
-                  <div style={{ fontSize: 12, color: theme.subtleText }}>Add an employee birthday to track</div>
+                  <div style={{ fontSize: 17, fontWeight: 900, color: theme.title }}>{editingBirthday ? "Edit Employee Details" : "Add Birthday"}</div>
+                  <div style={{ fontSize: 12, color: theme.subtleText }}>{editingBirthday ? "Update this employee's birthday details" : "Add an employee birthday to track"}</div>
                 </div>
               </div>
 
@@ -5023,16 +5111,18 @@ export default function AdminDashboard({
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Photo (optional)</label>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>{editingBirthday ? "Change Photo (optional)" : "Photo (optional)"}</label>
                   <input type="file" accept="image/*" style={inputStyle()} onChange={(e) => { const f = e.target.files?.[0] || null; setBirthdayPhoto(f); setBirthdayForm((prev) => ({ ...prev, photoName: f ? f.name : "" })); }} />
-                  {birthdayForm.photoName && <div style={{ marginTop: 6, fontSize: 12, color: "#ec4899", display: "flex", alignItems: "center", gap: 4 }}>🖼 {birthdayForm.photoName}</div>}
+                  {birthdayForm.photoName
+                    ? <div style={{ marginTop: 6, fontSize: 12, color: "#ec4899", display: "flex", alignItems: "center", gap: 4 }}>🖼 {birthdayForm.photoName}</div>
+                    : (editingBirthday && editingBirthday.photoLink) ? <div style={{ marginTop: 6, fontSize: 12, color: theme.subtleText }}>Current photo kept unless you choose a new one.</div> : null}
                 </div>
               </div>
 
               <div style={{ padding: "14px 24px", borderTop: `1px solid ${theme.cardBorder}`, display: "flex", justifyContent: "flex-end", gap: 10, background: theme.softCardBackground }}>
-                <button style={buttonStyle(false)} onClick={() => { setShowBirthdayModal(false); setBirthdayPhoto(null); setBirthdayForm({ name: "", birthday: "", photoName: "", gender: "" }); }} disabled={birthdaySaving}>Cancel</button>
-                <button style={{ ...buttonStyle(true), opacity: birthdaySaving ? 0.7 : 1 }} onClick={handleAddBirthday} disabled={birthdaySaving}>
-                  {birthdaySaving ? "Saving…" : "Save Birthday"}
+                <button style={buttonStyle(false)} onClick={() => { setShowBirthdayModal(false); resetBirthdayForm(); }} disabled={birthdaySaving}>Cancel</button>
+                <button style={{ ...buttonStyle(true), opacity: birthdaySaving ? 0.7 : 1 }} onClick={handleSaveBirthday} disabled={birthdaySaving}>
+                  {birthdaySaving ? "Saving…" : editingBirthday ? "Save Changes" : "Save Birthday"}
                 </button>
               </div>
             </div>

@@ -2109,6 +2109,33 @@ export default function HomePage() {
     });
   };
 
+  // Edit an existing birthday entry (name / date / gender, optional new photo).
+  // Updates the same Firestore document — never creates a duplicate.
+  const updateBirthday = async (
+    birthdayId: string,
+    payload: {
+      name: string;
+      birthday: string;
+      gender?: "male" | "female";
+      photo?: File | null;
+    }
+  ) => {
+    const update: Record<string, unknown> = {
+      name: payload.name,
+      birthday: payload.birthday,
+      gender: payload.gender ?? null,
+    };
+    if (payload.photo) {
+      const files = await uploadFilesToStorage("birthday-photos", "shared", [payload.photo]);
+      const path = files[0]?.path ?? "";
+      if (path) {
+        update.photoPath = path;
+        update.photoLink = ""; // re-resolved from the new path by the live listener
+      }
+    }
+    await updateDoc(doc(db, "birthdays", birthdayId), update);
+  };
+
   const saveBirthdayCardSettings = async (settings: BirthdayCardSettings) => {
     await setDoc(
       doc(db, "config", "birthdayCard"),
@@ -2851,6 +2878,7 @@ export default function HomePage() {
           onAssignTask={assignTask}
           onAddBirthday={addBirthday}
           onUpdateBirthdayPhoto={updateBirthdayPhoto}
+          onUpdateBirthday={updateBirthday}
           onDeleteBirthday={deleteBirthday}
           onAddOHCCertification={addOHCCertification}
           onUpdateOHCCertification={updateOHCCertification}
