@@ -1,4 +1,4 @@
-const CACHE = "eihg-portal-v2";
+const CACHE = "eihg-portal-v3";
 
 const PRECACHE = ["/", "/eihg-logo.jpeg"];
 
@@ -7,6 +7,10 @@ self.addEventListener("install", (event) => {
     caches.open(CACHE).then((cache) => cache.addAll(PRECACHE))
   );
   self.skipWaiting();
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
