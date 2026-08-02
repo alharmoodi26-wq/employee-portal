@@ -4576,6 +4576,13 @@ export default function AdminDashboard({
                       <button className="birthday-add-btn" style={buttonStyle(true)} onClick={() => setShowBirthdayModal(true)}>+ Add Birthday</button>
                     </div>
                     <input
+                      type="text"
+                      name="bd-name-filter"
+                      role="searchbox"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      spellCheck={false}
                       style={inputStyle()}
                       value={bdSearch}
                       onChange={e => setBdSearch(e.target.value)}
