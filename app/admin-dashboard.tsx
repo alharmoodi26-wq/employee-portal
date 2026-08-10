@@ -54,7 +54,7 @@ import {
 } from "./birthday-card";
 
 type DashboardTab = "dashboard" | "review" | "employees" | "hr" | "invoices" | "assessments" | "reports";
-type HRSubTab = "attendance" | "ohc" | "foodSafety" | "birthdays";
+type HRSubTab = "attendance" | "ohc" | "foodSafety" | "passports" | "birthdays";
 type ReviewFilter = "pending" | "active" | "approved";
 
 type BirthdayEntry = {
@@ -90,6 +90,18 @@ type FoodSafetyCertificationEntry = {
 };
 
 const FOOD_SAFETY_DEFAULT_EXPIRY = "2028-07-02";
+
+type PassportEntry = {
+  id: string;
+  name: string;
+  passportNumber: string;
+  country: string;
+  issueDate: string;
+  expiryDate: string;
+  photoPath?: string;
+  photoLink?: string;
+  updatedAt?: string;
+};
 
 type InvoiceStatus = "Approved" | "Pending Review" | "Paid";
 
@@ -230,6 +242,29 @@ type AdminDashboardProps = {
     }
   ) => Promise<void>;
   onDeleteFoodSafetyCertification?: (certificationId: string, employeeName: string) => Promise<void>;
+  passports?: PassportEntry[];
+  onAddPassport?: (payload: {
+    name: string;
+    passportNumber: string;
+    country: string;
+    issueDate: string;
+    expiryDate: string;
+    photo?: File | null;
+  }) => Promise<void>;
+  onUpdatePassport?: (
+    passportId: string,
+    payload: {
+      name: string;
+      passportNumber: string;
+      country: string;
+      issueDate: string;
+      expiryDate: string;
+      photo?: File | null;
+      currentPhotoPath?: string;
+      currentPhotoLink?: string;
+    }
+  ) => Promise<void>;
+  onDeletePassport?: (passportId: string, employeeName: string, passportNumber: string) => Promise<void>;
   onUpdateInvoice: (
     invoiceId: string,
     payload: {
@@ -414,6 +449,62 @@ function fsInitialsAvatar(name: string): string {
   ).toUpperCase() || "?";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" rx="50" fill="#0f1c35"/><text x="50" y="50" dy="0.35em" text-anchor="middle" font-family="Arial, sans-serif" font-size="42" font-weight="700" fill="#F0C040">${initials}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+// ── Staff Passport — status + helpers ──
+// Four-tier monitoring: Expired (red) / ≤6 months (orange) /
+// ≤12 months (yellow) / Valid (green). Calculated live from the expiry date.
+type PassportStatus = "Expired" | "Expiring 6mo" | "Expiring 12mo" | "Valid";
+
+function getPassportStatus(expiryDate: string): PassportStatus {
+  const days = getDaysUntil(expiryDate);
+  if (days === null) return "Valid";
+  if (days < 0) return "Expired";
+  if (days <= 183) return "Expiring 6mo";
+  if (days <= 365) return "Expiring 12mo";
+  return "Valid";
+}
+
+function getPassportStatusColor(status: PassportStatus) {
+  return status === "Expired" ? "#ef4444"
+    : status === "Expiring 6mo" ? "#f59e0b"
+    : status === "Expiring 12mo" ? "#eab308"
+    : "#10b981";
+}
+
+function getPassportStatusLabel(status: PassportStatus) {
+  return status === "Expired" ? "Expired"
+    : status === "Expiring 6mo" ? "≤ 6 Months"
+    : status === "Expiring 12mo" ? "≤ 12 Months"
+    : "Valid";
+}
+
+function getPassportBadgeStyle(status: PassportStatus): React.CSSProperties {
+  const isDark = getThemeMode() === "dark";
+  const base: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", whiteSpace: "nowrap",
+    borderRadius: 999, padding: "5px 10px", fontSize: 12, fontWeight: 800,
+  };
+  if (status === "Expired") return { ...base,
+    background: isDark ? "rgba(239,68,68,0.14)" : "#fee2e2",
+    color: isDark ? "#f87171" : "#991b1b",
+    border: `1px solid ${isDark ? "rgba(239,68,68,0.3)" : "#fecaca"}`,
+  };
+  if (status === "Expiring 6mo") return { ...base,
+    background: isDark ? "rgba(245,158,11,0.14)" : "#fff7ed",
+    color: isDark ? "#fb923c" : "#9a3412",
+    border: `1px solid ${isDark ? "rgba(245,158,11,0.3)" : "#fdba74"}`,
+  };
+  if (status === "Expiring 12mo") return { ...base,
+    background: isDark ? "rgba(234,179,8,0.14)" : "#fef9c3",
+    color: isDark ? "#facc15" : "#854d0e",
+    border: `1px solid ${isDark ? "rgba(234,179,8,0.3)" : "#fde047"}`,
+  };
+  return { ...base,
+    background: isDark ? "rgba(16,185,129,0.14)" : "#dcfce7",
+    color: isDark ? "#34d399" : "#166534",
+    border: `1px solid ${isDark ? "rgba(16,185,129,0.3)" : "#86efac"}`,
+  };
 }
 
 function formatFilesLabel(files: File[]) {
@@ -959,6 +1050,7 @@ export default function AdminDashboard({
   onSaveBirthdayCardSettings,
   ohcCertifications = [],
   foodSafetyCertifications = [],
+  passports = [],
   invoices,
   worksHasMore = false,
   tasksHasMore = false,
@@ -984,6 +1076,9 @@ export default function AdminDashboard({
   onAddFoodSafetyCertification,
   onUpdateFoodSafetyCertification,
   onDeleteFoodSafetyCertification,
+  onAddPassport,
+  onUpdatePassport,
+  onDeletePassport,
   onUpdateInvoice,
   onApproveInvoice,
   onOpenInvoiceAttachment,
@@ -1200,6 +1295,39 @@ export default function AdminDashboard({
     currentPhotoLink: "",
   });
 
+  // ── Staff Passport Monitoring — state ──
+  const [pSearch, setPSearch] = useState("");
+  const [pFormOpen, setPFormOpen] = useState(false);
+  const [pSaving, setPSaving] = useState(false);
+  const [editingPassport, setEditingPassport] = useState<PassportEntry | null>(null);
+  const [pPhoto, setPPhoto] = useState<File | null>(null);
+  const [pPhotoPreview, setPPhotoPreview] = useState<string>("");
+  const [pMenu, setPMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [pForm, setPForm] = useState({
+    name: "",
+    passportNumber: "",
+    country: "",
+    issueDate: "",
+    expiryDate: "",
+    currentPhotoPath: "",
+    currentPhotoLink: "",
+  });
+
+  // Close the passport "⋮" Actions menu on scroll / resize / Escape.
+  useEffect(() => {
+    if (!pMenu) return;
+    const close = () => setPMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPMenu(null); };
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [pMenu]);
+
   const now = new Date();
   const todayMonthDay = `${String(now.getMonth() + 1).padStart(2, "0")}-${String(
     now.getDate()
@@ -1286,6 +1414,43 @@ export default function AdminDashboard({
         return ta - tb;
       });
   }, [foodSafetyCertifications, fsSearch]);
+
+  // ── Staff Passport Monitoring — derived data (status computed live) ──
+  const expiredPassports = useMemo(
+    () => passports.filter((p) => getPassportStatus(p.expiryDate) === "Expired"),
+    [passports]
+  );
+  const expiring6Passports = useMemo(
+    () => passports.filter((p) => getPassportStatus(p.expiryDate) === "Expiring 6mo"),
+    [passports]
+  );
+  const expiring12Passports = useMemo(
+    () => passports.filter((p) => getPassportStatus(p.expiryDate) === "Expiring 12mo"),
+    [passports]
+  );
+  const passportAlerts = useMemo(
+    () => passports.filter((p) => {
+      const s = getPassportStatus(p.expiryDate);
+      return s === "Expired" || s === "Expiring 6mo";
+    }),
+    [passports]
+  );
+  const filteredSortedPassports = useMemo(() => {
+    const q = pSearch.trim().toLowerCase();
+    return passports
+      .filter((item) => {
+        if (!q) return true;
+        return item.name.toLowerCase().includes(q)
+          || (item.passportNumber || "").toLowerCase().includes(q)
+          || (item.country || "").toLowerCase().includes(q);
+      })
+      // Always sorted by expiry date ascending — soonest-to-expire first.
+      .sort((a, b) => {
+        const ta = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
+        const tb = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
+        return ta - tb;
+      });
+  }, [passports, pSearch]);
 
   // ── Employee photo lookup — built ONCE from the existing HR photo
   //    sources (OHC headshots, birthday photos, employee profile photos).
@@ -2457,6 +2622,313 @@ export default function AdminDashboard({
     setTimeout(() => popup.focus(), 100);
   };
 
+  // ── Staff Passport Monitoring — actions ──
+  const resetPForm = () => {
+    setPForm({ name: "", passportNumber: "", country: "", issueDate: "", expiryDate: "", currentPhotoPath: "", currentPhotoLink: "" });
+    setPPhoto(null);
+    setPPhotoPreview("");
+    setEditingPassport(null);
+  };
+
+  const openAddPassport = () => {
+    resetPForm();
+    setPFormOpen(true);
+  };
+
+  const openEditPassport = (item: PassportEntry) => {
+    setEditingPassport(item);
+    setPPhoto(null);
+    setPPhotoPreview(item.photoLink || "");
+    setPForm({
+      name: item.name,
+      passportNumber: item.passportNumber || "",
+      country: item.country || "",
+      issueDate: item.issueDate || "",
+      expiryDate: item.expiryDate || "",
+      currentPhotoPath: item.photoPath || "",
+      currentPhotoLink: item.photoLink || "",
+    });
+    setPFormOpen(true);
+  };
+
+  const handlePPhotoPick = (file: File | null) => {
+    if (!file) return;
+    const allowed = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    if (!allowed.includes(file.type)) {
+      showToast("error", "Please choose a JPG, JPEG, PNG or WEBP image.");
+      return;
+    }
+    setPPhoto(file);
+    setPPhotoPreview(URL.createObjectURL(file));
+  };
+
+  const openPMenu = (e: React.MouseEvent<HTMLButtonElement>, id: string) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const menuW = 224;
+    const x = Math.max(8, Math.min(r.right - menuW, window.innerWidth - menuW - 8));
+    const y = Math.min(r.bottom + 6, window.innerHeight - 180);
+    setPMenu((prev) => (prev && prev.id === id ? null : { id, x, y }));
+  };
+
+  const handleSavePassport = async () => {
+    if (!pForm.name.trim() || !pForm.passportNumber.trim() || !pForm.expiryDate) {
+      showToast("error", "Please enter the staff name, passport number and expiry date.");
+      return;
+    }
+    // Duplicate protection — passport number is the unique reference.
+    const num = pForm.passportNumber.trim().toLowerCase();
+    const dup = passports.find(
+      (p) => (p.passportNumber || "").trim().toLowerCase() === num && p.id !== editingPassport?.id
+    );
+    if (dup) {
+      showToast("error", `Passport number "${pForm.passportNumber.trim()}" already exists (${dup.name}).`);
+      return;
+    }
+
+    try {
+      setPSaving(true);
+      if (editingPassport && onUpdatePassport) {
+        await onUpdatePassport(editingPassport.id, {
+          name: pForm.name.trim(),
+          passportNumber: pForm.passportNumber.trim(),
+          country: pForm.country.trim(),
+          issueDate: pForm.issueDate,
+          expiryDate: pForm.expiryDate,
+          photo: pPhoto,
+          currentPhotoPath: pForm.currentPhotoPath,
+          currentPhotoLink: pForm.currentPhotoLink,
+        });
+        showToast("success", "Passport record updated successfully.");
+      } else if (!editingPassport && onAddPassport) {
+        await onAddPassport({
+          name: pForm.name.trim(),
+          passportNumber: pForm.passportNumber.trim(),
+          country: pForm.country.trim(),
+          issueDate: pForm.issueDate,
+          expiryDate: pForm.expiryDate,
+          photo: pPhoto,
+        });
+        showToast("success", "Passport record added successfully.");
+      }
+      setPFormOpen(false);
+      resetPForm();
+    } catch (error) {
+      console.error(error);
+      showToast("error", "Error saving passport record.");
+    } finally {
+      setPSaving(false);
+    }
+  };
+
+  const handleExportPassportExcel = () => {
+    const sorted = [...filteredSortedPassports];
+    const csvCell = (value: string | number) => {
+      const s = String(value ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = [
+      "#", "Staff Name", "Passport Number", "Country", "Issuance Date",
+      "Expiry Date", "Status", "Days Remaining",
+    ];
+    const lines = [header.map(csvCell).join(",")];
+    sorted.forEach((item, idx) => {
+      lines.push([
+        idx + 1,
+        item.name,
+        item.passportNumber || "",
+        item.country || "",
+        item.issueDate || "",
+        item.expiryDate || "",
+        getPassportStatusLabel(getPassportStatus(item.expiryDate)),
+        getFoodSafetyDaysLabel(item.expiryDate),
+      ].map(csvCell).join(","));
+    });
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `staff-passports-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const handlePrintPassportReport = () => {
+    const popup = window.open("", "_blank", "width=1200,height=900");
+    if (!popup) return;
+
+    const sorted = [...passports].sort((a, b) => {
+      const ta = a.expiryDate ? new Date(a.expiryDate).getTime() : Infinity;
+      const tb = b.expiryDate ? new Date(b.expiryDate).getTime() : Infinity;
+      return ta - tb;
+    });
+
+    const total    = sorted.length;
+    const expired  = sorted.filter(i => getPassportStatus(i.expiryDate) === "Expired").length;
+    const soon6    = sorted.filter(i => getPassportStatus(i.expiryDate) === "Expiring 6mo").length;
+    const soon12   = sorted.filter(i => getPassportStatus(i.expiryDate) === "Expiring 12mo").length;
+    const valid    = sorted.filter(i => getPassportStatus(i.expiryDate) === "Valid").length;
+
+    const statusColor = (s: PassportStatus) => s === "Expired" ? "#dc2626" : s === "Expiring 6mo" ? "#d97706" : s === "Expiring 12mo" ? "#a16207" : "#16a34a";
+    const statusBg    = (s: PassportStatus) => s === "Expired" ? "#fef2f2" : s === "Expiring 6mo" ? "#fff7ed" : s === "Expiring 12mo" ? "#fefce8" : "#f0fdf4";
+
+    const rows = sorted.map((item, idx) => {
+      const status = getPassportStatus(item.expiryDate);
+      const sc = statusColor(status);
+      const sb = statusBg(status);
+      const rowBg = idx % 2 === 0 ? "#ffffff" : "#f8fafc";
+      const avatar = fsInitialsAvatar(item.name);
+      const photoUrl = safeUrl(item.photoLink || getFSPhoto(item.name)) || avatar;
+      const photo = `<img class="emp-photo" src="${photoUrl}" alt="${escHtml(item.name)}" onerror="this.onerror=null;this.src='${avatar}'" />`;
+      return `<tr style="background:${rowBg}">
+        <td style="text-align:center;color:#9ca3af;font-size:11px;padding:8px 6px">${idx + 1}</td>
+        <td style="padding:8px 10px;text-align:center">${photo}</td>
+        <td style="padding:8px 12px;font-weight:700;font-size:13px;color:#1e293b">${escHtml(item.name)}</td>
+        <td style="padding:8px 12px;font-size:13px;color:#374151;font-weight:600">${escHtml(item.passportNumber || "—")}</td>
+        <td style="padding:8px 12px;font-size:12px;color:#6b7280">${escHtml(item.country || "—")}</td>
+        <td style="padding:8px 12px;font-size:12px;color:#6b7280;white-space:nowrap">${escHtml(formatFoodSafetyDate(item.issueDate))}</td>
+        <td style="padding:8px 12px;font-size:13px;font-weight:600;color:#374151;white-space:nowrap">${escHtml(formatFoodSafetyDate(item.expiryDate))}</td>
+        <td style="padding:8px 12px;text-align:center">
+          <span style="display:inline-block;padding:3px 11px;border-radius:999px;font-size:11px;font-weight:800;color:${sc};background:${sb};border:1px solid ${sc}30">${escHtml(getPassportStatusLabel(status))}</span>
+        </td>
+      </tr>`;
+    }).join("");
+
+    popup.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Staff Passport Monitoring — EIHG</title>
+  <style id="passport-report-style">
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#111827;background:#f9fafb}
+    .page{max-width:1080px;margin:0 auto;padding:40px 32px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:22px;border-bottom:3px solid #0f1c35;margin-bottom:24px}
+    .brand-box{display:flex;align-items:center;gap:14px}
+    .brand-icon{width:52px;height:52px;background:linear-gradient(145deg,#0f1c35,#1b2a4a);border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:2px solid #F0C040;flex-shrink:0}
+    .brand-title{font-size:19px;font-weight:900;color:#0f1c35;letter-spacing:-0.01em}
+    .brand-sub{font-size:11px;color:#6b7280;margin-top:2px;font-weight:500}
+    .report-meta{text-align:right;font-size:12px;color:#6b7280;line-height:1.9}
+    .report-meta strong{color:#374151}
+    .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:26px}
+    .tile{border-radius:12px;padding:16px 12px;text-align:center}
+    .tile-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
+    .tile-value{font-size:28px;font-weight:900;line-height:1}
+    table{width:100%;border-collapse:collapse;font-size:13px;box-shadow:0 1px 4px rgba(0,0,0,0.06);border-radius:10px;overflow:hidden}
+    thead tr{background:#0f1c35}
+    thead th{padding:11px 12px;text-align:left;font-weight:700;font-size:11px;letter-spacing:.05em;color:#F0C040}
+    thead th:first-child{text-align:center}
+    tbody td{border-bottom:1px solid #e5e7eb;vertical-align:middle}
+    .emp-photo{width:42px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;display:block;margin:0 auto;background:#f3f4f6}
+    .legend{margin-top:18px;display:flex;flex-wrap:wrap;gap:16px;font-size:11px;color:#374151;padding:12px 14px;border:1px solid #e5e7eb;border-radius:10px;background:#fff}
+    .legend span{display:inline-flex;align-items:center;gap:6px}
+    .legend i{width:12px;height:12px;border-radius:3px;display:inline-block}
+    .footer{margin-top:20px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af}
+    .no-print{position:sticky;top:0;z-index:100;display:flex;align-items:center;gap:8px;padding:10px 20px;background:#fff;border-bottom:1px solid #e5e7eb;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+    .no-print button[disabled]{opacity:0.55;cursor:not-allowed}
+    @media print{body{background:#fff}.page{padding:20px}.no-print{display:none!important}table{box-shadow:none}.emp-photo{-webkit-print-color-adjust:exact;print-color-adjust:exact}.legend{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  </style>
+</head>
+<body>
+<div class="no-print">
+  <button onclick="window.close()" style="padding:8px 20px;border-radius:8px;border:none;background:linear-gradient(135deg,#0f1c35,#1b2a4a);color:#F0C040;cursor:pointer;font-size:13px;font-weight:700">← Back to Portal</button>
+  <button id="printBtn" disabled onclick="window.print()" style="padding:8px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#1e293b;cursor:pointer;font-size:13px;font-weight:700">⏳ Loading photos…</button>
+  <span id="loadStatus" style="font-size:11px;color:#9ca3af">Preparing employee photos…</span>
+</div>
+<div class="page">
+  <div class="header">
+    <div class="brand-box">
+      <div class="brand-icon">
+        <span style="color:#F0C040;font-size:13px;font-weight:900;letter-spacing:0.06em;line-height:1">EIHG</span>
+        <span style="color:#c9a520;font-size:7px;font-weight:700;letter-spacing:0.18em;line-height:1;margin-top:3px">PORTAL</span>
+      </div>
+      <div>
+        <div class="brand-title">Staff Passport Monitoring</div>
+        <div class="brand-sub">Emirates International Holdings Group — Full Report · Sorted by Expiry Date</div>
+      </div>
+    </div>
+    <div class="report-meta">
+      <strong>Printed by:</strong> ${escHtml(currentUser.name)}<br/>
+      <strong>Date:</strong> ${new Date().toLocaleString()}<br/>
+      <strong>Total Records:</strong> ${total}
+    </div>
+  </div>
+
+  <div class="tiles">
+    <div class="tile" style="background:#fef2f2;border:1px solid #fecaca">
+      <div class="tile-label" style="color:#991b1b">Expired</div>
+      <div class="tile-value" style="color:#dc2626">${expired}</div>
+    </div>
+    <div class="tile" style="background:#fff7ed;border:1px solid #fdba74">
+      <div class="tile-label" style="color:#9a3412">≤ 6 Months</div>
+      <div class="tile-value" style="color:#d97706">${soon6}</div>
+    </div>
+    <div class="tile" style="background:#fefce8;border:1px solid #fde047">
+      <div class="tile-label" style="color:#854d0e">≤ 12 Months</div>
+      <div class="tile-value" style="color:#a16207">${soon12}</div>
+    </div>
+    <div class="tile" style="background:#f0fdf4;border:1px solid #bbf7d0">
+      <div class="tile-label" style="color:#166534">Valid</div>
+      <div class="tile-value" style="color:#16a34a">${valid}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:36px;text-align:center">#</th>
+        <th style="width:64px;text-align:center">Photo</th>
+        <th>Staff Name</th>
+        <th style="width:140px">Passport No.</th>
+        <th style="width:120px">Country</th>
+        <th style="width:110px">Issuance Date</th>
+        <th style="width:110px">Expiry Date</th>
+        <th style="width:120px;text-align:center">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows}
+    </tbody>
+  </table>
+
+  <div class="legend">
+    <strong style="color:#111827">Legend:</strong>
+    <span><i style="background:#ef4444"></i> Expired</span>
+    <span><i style="background:#f59e0b"></i> Expires within 6 months</span>
+    <span><i style="background:#eab308"></i> Expires within 12 months</span>
+    <span><i style="background:#10b981"></i> Valid (more than 12 months)</span>
+  </div>
+
+  <div class="footer">
+    <span>Emirates International Holdings Group — Confidential Document</span>
+    <span>Generated: ${new Date().toLocaleString()}</span>
+  </div>
+</div>
+<script>
+  (function () {
+    var imgs = Array.prototype.slice.call(document.images);
+    var btn = document.getElementById('printBtn');
+    var status = document.getElementById('loadStatus');
+    var total = imgs.length, done = 0;
+    function ready() {
+      if (btn) { btn.disabled = false; btn.textContent = '🖨 Print / Save as PDF'; }
+      if (status) { status.textContent = total + ' photo' + (total === 1 ? '' : 's') + ' ready'; }
+    }
+    function tick() { done += 1; if (status) status.textContent = 'Loading photos… ' + done + '/' + total; if (done >= total) ready(); }
+    if (total === 0) { ready(); return; }
+    imgs.forEach(function (im) {
+      if (im.complete) { tick(); }
+      else { im.addEventListener('load', tick); im.addEventListener('error', tick); }
+    });
+  })();
+</script>
+</body>
+</html>`);
+    popup.document.close();
+    setTimeout(() => popup.focus(), 100);
+  };
+
   const handleAssignTask = async () => {
     if (!selectedEmployee || !assignForm.title) {
       showToast("error", "Please select an employee and fill the task title.");
@@ -2659,6 +3131,17 @@ export default function AdminDashboard({
                       <div style={{ fontSize: 12, color: theme.subtleText }}>Expired or expiring within 30 days</div>
                     </div>
                     <span style={{ marginLeft: "auto", fontSize: 11, color: "#0ea5e9", fontWeight: 800 }}>→</span>
+                  </button>
+                )}
+                {passportAlerts.length > 0 && (
+                  <button onClick={() => { setActiveTab("hr"); setHrSubTab("passports"); setShowNotifications(false); }}
+                    style={{ ...notifItemStyle(theme), background: "rgba(139,92,246,0.08)" }}>
+                    <span style={{ fontSize: 20 }}>🛂</span>
+                    <div>
+                      <div style={{ fontWeight: 700, color: theme.title, fontSize: 13 }}>{passportAlerts.length} passport{passportAlerts.length > 1 ? "s" : ""} need attention</div>
+                      <div style={{ fontSize: 12, color: theme.subtleText }}>Expired or expiring within 6 months</div>
+                    </div>
+                    <span style={{ marginLeft: "auto", fontSize: 11, color: "#8b5cf6", fontWeight: 800 }}>→</span>
                   </button>
                 )}
               </>
@@ -3086,7 +3569,7 @@ export default function AdminDashboard({
                 {[
                   { label: "Review Queue", tab: "review" as DashboardTab,    icon: "📋", color: "#f59e0b", badge: pendingCount },
                   { label: "Employees",    tab: "employees" as DashboardTab, icon: "👥", color: "#6366f1", badge: 0 },
-                  { label: "HR",           tab: "hr" as DashboardTab,        icon: "⚕️", color: "#ef4444", badge: ohcRenewalAlerts.length + fsRenewalAlerts.length + todaysBirthdays.length },
+                  { label: "HR",           tab: "hr" as DashboardTab,        icon: "⚕️", color: "#ef4444", badge: ohcRenewalAlerts.length + fsRenewalAlerts.length + passportAlerts.length + todaysBirthdays.length },
                   { label: "Invoices",     tab: "invoices" as DashboardTab,  icon: "🧾", color: "#8b5cf6", badge: invoiceReviewItems.length },
                 ].map(({ label, tab, icon, color, badge }) => (
                   <button
@@ -4314,11 +4797,12 @@ export default function AdminDashboard({
             <div style={{ display: "grid", gap: 16 }}>
 
               {/* HR overview tiles — double as tab switcher */}
-              <div className="hr-overview-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+              <div className="hr-overview-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
                 {([
                   { id: "attendance" as HRSubTab, icon: "🕐", label: "Pending Attendance", value: pendingAttendanceCount, color: "#f59e0b" },
                   { id: "ohc"        as HRSubTab, icon: "⚕️", label: "OHC Alerts",          value: expiringSoonOHCCerts.length + expiredOHCCerts.length, color: "#ef4444" },
                   { id: "foodSafety" as HRSubTab, icon: "🥗", label: "Food Safety Alerts",  value: expiringSoonFS.length + expiredFS.length, color: "#0ea5e9" },
+                  { id: "passports"  as HRSubTab, icon: "🛂", label: "Passport Alerts",      value: passportAlerts.length,  color: "#8b5cf6" },
                   { id: "birthdays"  as HRSubTab, icon: "🎂", label: "Birthdays",            value: birthdays.length,       color: "#ec4899" },
                 ] as { id: HRSubTab; icon: string; label: string; value: number; color: string }[]).map(({ id, icon, label, value, color }) => (
                   <button key={id} onClick={() => setHrSubTab(id)} style={{
@@ -4615,6 +5099,177 @@ export default function AdminDashboard({
                   ) : (
                     <EmptyState icon="🥗" title="No Food Safety certificates" description={fsSearch ? "No results for your search." : "Add certificates to track renewals and expiry alerts."} />
                   )}
+                </div>
+              )}
+
+              {/* ── Staff Passport Monitoring ── */}
+              {hrSubTab === "passports" && (
+                <div style={{ display: "grid", gap: 14 }}>
+                  {/* Summary cards */}
+                  <div className="fs-stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                    {[
+                      { label: "Total Passports",           value: passports.length,          color: "#6366f1" },
+                      { label: "Expired",                   value: expiredPassports.length,   color: "#ef4444" },
+                      { label: "Expiring Within 6 Months",  value: expiring6Passports.length, color: "#f59e0b" },
+                      { label: "Expiring Within 12 Months", value: expiring12Passports.length, color: "#eab308" },
+                    ].map(({ label, value, color }) => (
+                      <div key={label} style={{ background: theme.cardBackground, borderTop: `3px solid ${color}`, borderLeft: `1px solid ${theme.cardBorder}`, borderRight: `1px solid ${theme.cardBorder}`, borderBottom: `1px solid ${theme.cardBorder}`, borderRadius: 12, padding: "12px 14px" }}>
+                        <div style={{ fontSize: 11, color: theme.subtleText, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
+                        <div style={{ fontSize: 24, fontWeight: 900, color, lineHeight: 1 }}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Passport alert banner (in-app notification) */}
+                  {passportAlerts.length > 0 && (
+                    <div style={{ borderRadius: 14, border: `1px solid ${theme.cardBorder}`, borderLeft: "4px solid #ef4444", background: theme.softCardBackground, padding: "12px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 20 }}>🛂</span>
+                      <div style={{ fontSize: 13, color: theme.title, fontWeight: 700 }}>
+                        {passportAlerts.length} passport{passportAlerts.length > 1 ? "s" : ""} need urgent attention
+                        <span style={{ fontWeight: 500, color: theme.subtleText, marginLeft: 6 }}>· expired or expiring within 6 months</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Search + actions — same layout as OHC / Food Safety */}
+                  <div className="fs-action-bar" style={{ ...cardStyle(), padding: "12px 16px", display: "flex", gap: 10, alignItems: "center" }}>
+                    <input
+                      type="text" name="passport-filter" autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                      style={{ ...inputStyle(), flex: 1, minWidth: 0 }}
+                      value={pSearch}
+                      onChange={e => setPSearch(e.target.value)}
+                      placeholder="🔍  Search by name, passport no. or country…"
+                    />
+                    <button style={buttonStyle(false)} onClick={handlePrintPassportReport}>🖨 Print Report</button>
+                    <button style={buttonStyle(false)} onClick={handleExportPassportExcel}>📊 Excel</button>
+                    <button style={buttonStyle(true)} onClick={openAddPassport}>+ Add Passport</button>
+                  </div>
+
+                  {filteredSortedPassports.length > 0 ? (
+                    <>
+                      {/* Desktop table */}
+                      <div className="fs-table-desktop" style={{ ...cardStyle(), padding: 0, overflow: "hidden" }}>
+                        <div style={{ overflowX: "auto" }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                            <thead>
+                              <tr style={{ background: theme.softCardBackground }}>
+                                {["Photo", "Staff Name", "Passport No.", "Country", "Issuance Date", "Expiry Date", "Status", "Days Remaining", "Actions"].map((h) => (
+                                  <th key={h} style={{ textAlign: h === "Status" || h === "Actions" || h === "Photo" ? "center" : "left", padding: "11px 14px", fontSize: 11, fontWeight: 700, color: theme.subtleText, textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap", borderBottom: `1px solid ${theme.cardBorder}` }}>{h}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {filteredSortedPassports.map((item) => {
+                                const status = getPassportStatus(item.expiryDate);
+                                const accent = getPassportStatusColor(status);
+                                const photo = item.photoLink || getFSPhoto(item.name);
+                                const avatar = fsInitialsAvatar(item.name);
+                                return (
+                                  <tr key={item.id} style={{ borderBottom: `1px solid ${theme.cardBorder}` }}>
+                                    <td style={{ padding: "8px 14px", textAlign: "center" }}>
+                                      <img
+                                        src={photo || avatar} alt={item.name} width={34} height={34}
+                                        loading="lazy" decoding="async"
+                                        onError={(e) => { if (e.currentTarget.src !== avatar) e.currentTarget.src = avatar; }}
+                                        style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", border: `1px solid ${theme.cardBorder}`, background: theme.softCardBackground, verticalAlign: "middle" }}
+                                      />
+                                    </td>
+                                    <td style={{ padding: "10px 14px", fontWeight: 700, color: theme.title, whiteSpace: "nowrap" }}>{item.name}</td>
+                                    <td style={{ padding: "10px 14px", color: theme.mutedText, fontWeight: 600 }}>{item.passportNumber || "—"}</td>
+                                    <td style={{ padding: "10px 14px", color: theme.mutedText }}>{item.country || "—"}</td>
+                                    <td style={{ padding: "10px 14px", color: theme.mutedText, whiteSpace: "nowrap" }}>{formatFoodSafetyDate(item.issueDate)}</td>
+                                    <td style={{ padding: "10px 14px", color: accent, fontWeight: 700, whiteSpace: "nowrap" }}>{formatFoodSafetyDate(item.expiryDate)}</td>
+                                    <td style={{ padding: "10px 14px", textAlign: "center" }}><span style={getPassportBadgeStyle(status)}>{getPassportStatusLabel(status)}</span></td>
+                                    <td style={{ padding: "10px 14px", color: status === "Expired" ? "#ef4444" : theme.mutedText, whiteSpace: "nowrap", fontWeight: status === "Valid" ? 400 : 600 }}>{getFoodSafetyDaysLabel(item.expiryDate)}</td>
+                                    <td style={{ padding: "10px 14px", width: 1, whiteSpace: "nowrap", textAlign: "center" }}>
+                                      <button title="Actions" aria-haspopup="menu" aria-expanded={pMenu?.id === item.id} style={{ ...invoiceIconBtn(theme), color: theme.mutedText }} onClick={(e) => openPMenu(e, item.id)}>⋮</button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Mobile cards */}
+                      <div className="fs-cards-mobile" style={{ display: "none", gap: 10 }}>
+                        {filteredSortedPassports.map((item) => {
+                          const status = getPassportStatus(item.expiryDate);
+                          const accent = getPassportStatusColor(status);
+                          const photo = item.photoLink || getFSPhoto(item.name);
+                          const avatar = fsInitialsAvatar(item.name);
+                          return (
+                            <div key={item.id} style={{ background: theme.cardBackground, border: `1px solid ${theme.cardBorder}`, borderLeft: `4px solid ${accent}`, borderRadius: 12, padding: "12px 14px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                                  <img
+                                    src={photo || avatar} alt={item.name} width={38} height={38}
+                                    loading="lazy" decoding="async"
+                                    onError={(e) => { if (e.currentTarget.src !== avatar) e.currentTarget.src = avatar; }}
+                                    style={{ width: 38, height: 38, borderRadius: "50%", objectFit: "cover", flexShrink: 0, border: `1px solid ${theme.cardBorder}`, background: theme.softCardBackground }}
+                                  />
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontWeight: 800, fontSize: 14, color: theme.title }}>{item.name}</div>
+                                    <div style={{ fontSize: 12, color: theme.subtleText, marginTop: 2 }}>
+                                      {item.passportNumber || "—"}{item.country ? ` · ${item.country}` : ""}
+                                    </div>
+                                  </div>
+                                </div>
+                                <span style={getPassportBadgeStyle(status)}>{getPassportStatusLabel(status)}</span>
+                              </div>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10, fontSize: 12, color: theme.mutedText }}>
+                                <div>Issued: <strong style={{ color: theme.title }}>{formatFoodSafetyDate(item.issueDate)}</strong></div>
+                                <div>Expires: <strong style={{ color: accent }}>{formatFoodSafetyDate(item.expiryDate)}</strong></div>
+                                <div style={{ gridColumn: "1 / -1" }}>{getFoodSafetyDaysLabel(item.expiryDate)}</div>
+                              </div>
+                              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                                <button style={{ ...buttonStyle(false), flex: 1 }} onClick={() => openEditPassport(item)}>✏️ Edit</button>
+                                <button style={{ ...buttonStyle(false), flex: 1 }} onClick={() => onDeletePassport?.(item.id, item.name, item.passportNumber)}>🗑 Delete</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <EmptyState icon="🛂" title="No passport records" description={pSearch ? "No results for your search." : "Add passports to monitor expiry dates and renewals."} />
+                  )}
+
+                  {/* ⋮ Actions dropdown (fixed — never hidden behind rows) */}
+                  {pMenu && (() => {
+                    const item = passports.find((p) => p.id === pMenu.id);
+                    if (!item) return null;
+                    const photo = item.photoLink || getFSPhoto(item.name);
+                    const itemBtn = (extra?: React.CSSProperties): React.CSSProperties => ({
+                      display: "flex", alignItems: "center", gap: 10, width: "100%",
+                      padding: "10px 14px", background: "transparent", border: "none",
+                      cursor: "pointer", fontSize: 13, fontWeight: 600, textAlign: "left",
+                      color: theme.title, ...extra,
+                    });
+                    return (
+                      <>
+                        <div onClick={() => setPMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 4000, background: "transparent" }} />
+                        <div role="menu" style={{ position: "fixed", top: pMenu.y, left: pMenu.x, zIndex: 4001, minWidth: 224, background: theme.cardBackground, border: `1px solid ${theme.cardBorder}`, borderRadius: 12, boxShadow: "0 12px 30px rgba(15,23,42,0.18)", overflow: "hidden", padding: "6px 0" }}>
+                          <button role="menuitem" style={itemBtn()}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = theme.softCardBackground)}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                            onClick={() => { setPMenu(null); openEditPassport(item); }}>✏️ <span>Edit Passport</span></button>
+                          {photo && (
+                            <button role="menuitem" style={itemBtn()}
+                              onMouseEnter={(e) => (e.currentTarget.style.background = theme.softCardBackground)}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                              onClick={() => { setPMenu(null); setOhcPreview({ title: `${item.name} — Employee Photo`, image: photo }); }}>🖼 <span>View Employee Photo</span></button>
+                          )}
+                          <div style={{ height: 1, background: theme.cardBorder, margin: "6px 0" }} />
+                          <button role="menuitem" style={itemBtn({ color: "#ef4444" })}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(239,68,68,0.08)")}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                            onClick={() => { setPMenu(null); onDeletePassport?.(item.id, item.name, item.passportNumber); }}>🗑 <span>Delete</span></button>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -5424,6 +6079,91 @@ export default function AdminDashboard({
                   <button style={buttonStyle(false)} onClick={() => { setFsFormOpen(false); resetFSForm(); }} disabled={fsSaving}>Cancel</button>
                   <button style={{ ...buttonStyle(true), opacity: fsSaving ? 0.7 : 1 }} onClick={handleSaveFS} disabled={fsSaving}>
                     {fsSaving ? "Saving…" : editingFS ? "Save Changes" : "Add Certificate"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pFormOpen && (
+          <div style={{ position: "fixed", inset: 0, background: theme.modalOverlay, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2200, padding: 20 }}>
+            <div style={{ ...cardStyle(), maxWidth: 580, width: "100%", borderRadius: 18, overflow: "hidden", padding: 0 }}>
+              <div style={{ padding: "18px 24px", borderBottom: `1px solid ${theme.cardBorder}`, display: "flex", alignItems: "center", gap: 12, background: theme.softCardBackground }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: "rgba(139,92,246,0.14)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>🛂</div>
+                <div>
+                  <div style={{ fontSize: 17, fontWeight: 900, color: theme.title }}>{editingPassport ? "Edit Passport" : "Add Passport"}</div>
+                  <div style={{ fontSize: 12, color: theme.subtleText }}>{editingPassport ? "Update this passport record" : "Add a new staff passport record"}</div>
+                </div>
+              </div>
+
+              <div className="form-2col" style={{ padding: "20px 24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                <div>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Staff Name *</label>
+                  <input style={inputStyle()} value={pForm.name} onChange={(e) => setPForm((prev) => ({ ...prev, name: e.target.value }))} placeholder="Enter staff name" />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Passport Number *</label>
+                  <input style={inputStyle()} value={pForm.passportNumber} onChange={(e) => setPForm((prev) => ({ ...prev, passportNumber: e.target.value }))} placeholder="e.g. P1234567A" />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Country</label>
+                  <input style={inputStyle()} value={pForm.country} onChange={(e) => setPForm((prev) => ({ ...prev, country: e.target.value }))} placeholder="e.g. Philippines" />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Employee Photo</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <img
+                      src={pPhotoPreview || getFSPhoto(pForm.name) || fsInitialsAvatar(pForm.name)}
+                      alt="Employee photo preview"
+                      width={64} height={64}
+                      onError={(e) => { const a = fsInitialsAvatar(pForm.name); if (e.currentTarget.src !== a) e.currentTarget.src = a; }}
+                      style={{ width: 64, height: 64, borderRadius: "50%", objectFit: "cover", border: `1px solid ${theme.cardBorder}`, background: theme.softCardBackground, flexShrink: 0 }}
+                    />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+                      <label style={{ ...buttonStyle(false), display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer", margin: 0 }}>
+                        📷 Upload Photo
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                          style={{ display: "none" }}
+                          onChange={(e) => { handlePPhotoPick(e.target.files?.[0] || null); e.target.value = ""; }}
+                        />
+                      </label>
+                      {pPhotoPreview && (
+                        <button
+                          type="button"
+                          style={{ ...buttonStyle(false), fontSize: 12 }}
+                          onClick={() => { setPPhoto(null); setPPhotoPreview(""); setPForm((prev) => ({ ...prev, currentPhotoPath: "", currentPhotoLink: "" })); }}
+                        >
+                          Remove photo
+                        </button>
+                      )}
+                      <div style={{ fontSize: 11, color: theme.subtleText }}>Optional. If left empty, the matched employee photo is used.</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Issuance Date</label>
+                  <input type="date" style={inputStyle()} value={pForm.issueDate} onChange={(e) => setPForm((prev) => ({ ...prev, issueDate: e.target.value }))} />
+                </div>
+
+                <div>
+                  <label style={{ display: "block", marginBottom: 6, fontSize: 12, fontWeight: 700, color: theme.mutedText, textTransform: "uppercase", letterSpacing: "0.05em" }}>Expiry Date *</label>
+                  <input type="date" style={inputStyle()} value={pForm.expiryDate} onChange={(e) => setPForm((prev) => ({ ...prev, expiryDate: e.target.value }))} />
+                </div>
+              </div>
+
+              <div style={{ padding: "14px 24px", borderTop: `1px solid ${theme.cardBorder}`, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: theme.softCardBackground }}>
+                <div>{editingPassport && <button style={dangerButtonStyle()} onClick={() => { const it = editingPassport; setPFormOpen(false); onDeletePassport?.(it.id, it.name, it.passportNumber); resetPForm(); }}>🗑 Delete</button>}</div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button style={buttonStyle(false)} onClick={() => { setPFormOpen(false); resetPForm(); }} disabled={pSaving}>Cancel</button>
+                  <button style={{ ...buttonStyle(true), opacity: pSaving ? 0.7 : 1 }} onClick={handleSavePassport} disabled={pSaving}>
+                    {pSaving ? "Saving…" : editingPassport ? "Save Changes" : "Add Passport"}
                   </button>
                 </div>
               </div>

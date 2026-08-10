@@ -141,6 +141,18 @@ type FoodSafetyCertificationEntry = {
   updatedAt?: string;
 };
 
+type PassportEntry = {
+  id: string;
+  name: string;
+  passportNumber: string;
+  country: string;
+  issueDate: string;
+  expiryDate: string;
+  photoPath?: string;
+  photoLink?: string;
+  updatedAt?: string;
+};
+
 type InvoiceStatus = "Approved" | "Pending Review" | "Paid";
 
 type ExtractionStatus = "ready_for_review" | "pending_review" | "failed" | "duplicate";
@@ -570,6 +582,7 @@ export default function HomePage() {
     useState<BirthdayCardSettings>(DEFAULT_BIRTHDAY_CARD_SETTINGS);
   const [ohcCertifications, setOhcCertifications] = useState<OHCCertificationEntry[]>([]);
   const [foodSafetyCertifications, setFoodSafetyCertifications] = useState<FoodSafetyCertificationEntry[]>([]);
+  const [passports, setPassports] = useState<PassportEntry[]>([]);
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [assessmentSubmissions, setAssessmentSubmissions] = useState<AssessmentSubmission[]>([]);
@@ -588,6 +601,7 @@ export default function HomePage() {
   const [loadingBirthdays, setLoadingBirthdays] = useState(true);
   const [loadingOHC, setLoadingOHC] = useState(true);
   const [loadingFoodSafety, setLoadingFoodSafety] = useState(true);
+  const [loadingPassports, setLoadingPassports] = useState(true);
   const [loadingInvoices, setLoadingInvoices] = useState(true);
   const [themeMode, setThemeModeState] = useState<ThemeMode>("light");
   const [themeReady, setThemeReady] = useState(true);
@@ -625,6 +639,7 @@ export default function HomePage() {
   const birthdayUrlCache = useRef<Record<string, string>>({});
   const ohcUrlCache = useRef<Record<string, string>>({});
   const foodSafetyUrlCache = useRef<Record<string, string>>({});
+  const passportUrlCache = useRef<Record<string, string>>({});
 
   const showToast = (type: ToastType, message: string) => {
     setToast({ type, message });
@@ -681,6 +696,7 @@ export default function HomePage() {
           setBirthdays([]);
           setOhcCertifications([]);
           setFoodSafetyCertifications([]);
+          setPassports([]);
           setInvoices([]);
           setAssessments([]);
           setAssessmentSubmissions([]);
@@ -1148,6 +1164,73 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!currentUser) {
+      setPassports([]);
+      setLoadingPassports(false);
+      return;
+    }
+
+    setLoadingPassports(true);
+
+    const unsubscribe = onSnapshot(
+      query(collection(db, "staffPassports"), orderBy("createdAt", "desc")),
+      async (snapshot) => {
+        try {
+          const items = await Promise.all(
+            snapshot.docs.map(async (document) => {
+              const data = document.data();
+              const updatedRaw = data.updatedAt;
+              let updatedAt = "";
+              if (updatedRaw && typeof updatedRaw.toDate === "function") {
+                updatedAt = updatedRaw.toDate().toISOString();
+              } else if (typeof updatedRaw === "string") {
+                updatedAt = updatedRaw;
+              }
+
+              let photoLink = data.photoLink ?? "";
+              if (!photoLink && data.photoPath) {
+                if (passportUrlCache.current[data.photoPath]) {
+                  photoLink = passportUrlCache.current[data.photoPath];
+                } else {
+                  try {
+                    photoLink = await getDownloadURL(ref(storage, data.photoPath));
+                    passportUrlCache.current[data.photoPath] = photoLink;
+                  } catch (error) {
+                    console.error("Error getting passport photo URL:", error);
+                  }
+                }
+              }
+
+              return {
+                id: document.id,
+                name: data.name ?? "",
+                passportNumber: data.passportNumber ?? "",
+                country: data.country ?? "",
+                issueDate: data.issueDate ?? "",
+                expiryDate: data.expiryDate ?? "",
+                photoPath: data.photoPath ?? "",
+                photoLink,
+                updatedAt,
+              } as PassportEntry;
+            })
+          );
+          setPassports(items);
+          setLoadingPassports(false);
+        } catch (error) {
+          console.error("Error mapping passports:", error);
+          setLoadingPassports(false);
+        }
+      },
+      (error) => {
+        console.error("Error loading passports:", error);
+        setLoadingPassports(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) {
       setInvoices([]);
       setLoadingInvoices(false);
       return;
@@ -1512,6 +1595,7 @@ export default function HomePage() {
       setBirthdays([]);
       setOhcCertifications([]);
       setFoodSafetyCertifications([]);
+      setPassports([]);
       setInvoices([]);
       setAssessments([]);
       setAssessmentSubmissions([]);
@@ -2357,6 +2441,83 @@ export default function HomePage() {
     });
   };
 
+  const addPassport = async (payload: {
+    name: string;
+    passportNumber: string;
+    country: string;
+    issueDate: string;
+    expiryDate: string;
+    photo?: File | null;
+  }) => {
+    let photoPath = "";
+    if (payload.photo) {
+      const files = await uploadFilesToStorage("passport-photos", "shared", [payload.photo]);
+      photoPath = files[0]?.path ?? "";
+    }
+    await addDoc(collection(db, "staffPassports"), {
+      name: payload.name,
+      passportNumber: payload.passportNumber,
+      country: payload.country,
+      issueDate: payload.issueDate,
+      expiryDate: payload.expiryDate,
+      photoPath,
+      photoLink: "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const updatePassport = async (
+    passportId: string,
+    payload: {
+      name: string;
+      passportNumber: string;
+      country: string;
+      issueDate: string;
+      expiryDate: string;
+      photo?: File | null;
+      currentPhotoPath?: string;
+      currentPhotoLink?: string;
+    }
+  ) => {
+    let photoPath = payload.currentPhotoPath ?? "";
+    let photoLink = payload.currentPhotoLink ?? "";
+    if (payload.photo) {
+      const files = await uploadFilesToStorage("passport-photos", "shared", [payload.photo]);
+      photoPath = files[0]?.path ?? "";
+      photoLink = "";
+    }
+    const refDoc = doc(db, "staffPassports", passportId);
+    await updateDoc(refDoc, {
+      name: payload.name,
+      passportNumber: payload.passportNumber,
+      country: payload.country,
+      issueDate: payload.issueDate,
+      expiryDate: payload.expiryDate,
+      photoPath,
+      photoLink,
+      updatedAt: serverTimestamp(),
+    });
+  };
+
+  const deletePassport = async (passportId: string, employeeName: string, passportNumber: string) => {
+    setConfirmState({
+      open: true,
+      title: "Delete passport record",
+      message: `Are you sure you want to delete the passport record for ${employeeName} (Passport No. ${passportNumber})? This removes only the passport record.`,
+      onConfirm: async () => {
+        try {
+          const refDoc = doc(db, "staffPassports", passportId);
+          await deleteDoc(refDoc);
+          showToast("success", "Passport record deleted successfully.");
+        } catch (error) {
+          console.error(error);
+          showToast("error", "Error deleting passport record.");
+        }
+      },
+    });
+  };
+
   const submitTask = async (id: string, submittedNotes: string, submittedFiles: File[]) => {
     const taskDoc = assignedTasks.find((task) => task.id === id);
     const ownerId = taskDoc?.employeeUid || currentUser?.uid || "unknown-user";
@@ -2862,6 +3023,7 @@ export default function HomePage() {
           onSaveBirthdayCardSettings={saveBirthdayCardSettings}
           ohcCertifications={ohcCertifications}
           foodSafetyCertifications={foodSafetyCertifications}
+          passports={passports}
           invoices={invoices}
           worksHasMore={worksHasMore}
           tasksHasMore={tasksHasMore}
@@ -2887,6 +3049,9 @@ export default function HomePage() {
           onAddFoodSafetyCertification={addFoodSafetyCertification}
           onUpdateFoodSafetyCertification={updateFoodSafetyCertification}
           onDeleteFoodSafetyCertification={deleteFoodSafetyCertification}
+          onAddPassport={addPassport}
+          onUpdatePassport={updatePassport}
+          onDeletePassport={deletePassport}
           onUpdateInvoice={updateInvoice}
           onApproveInvoice={approveInvoice}
           onOpenInvoiceAttachment={openInvoiceAttachment}
