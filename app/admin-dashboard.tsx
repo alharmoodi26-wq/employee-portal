@@ -1486,16 +1486,27 @@ export default function AdminDashboard({
       const certTokens = norm.split(" ").filter(Boolean);
       if (certTokens.length < 2) return ""; // too little to fuzzy-match safely
       const certSet = new Set(certTokens);
-      const candidatePhotos = new Set<string>();
+      // Collect confident candidates (≥2 shared tokens + one name is a subset
+      // of the other). The same person can appear across sources under names
+      // of different completeness (e.g. "Vince Kian Torres Dumlao" vs "Vince
+      // Kian Dumlao"), and passport names arrive reversed ("DUMLAO, Vince …").
+      const candidates: { tokens: string[]; photo: string }[] = [];
       for (const e of fsPhotoIndex.entries) {
         const candSet = new Set(e.tokens);
         let overlap = 0;
         for (const t of certSet) if (candSet.has(t)) overlap += 1;
         const subset =
           certTokens.every((t) => candSet.has(t)) || e.tokens.every((t) => certSet.has(t));
-        if (overlap >= 2 && subset) candidatePhotos.add(e.photo);
+        if (overlap >= 2 && subset) candidates.push({ tokens: e.tokens, photo: e.photo });
       }
-      return candidatePhotos.size === 1 ? [...candidatePhotos][0] : "";
+      if (candidates.length === 0) return "";
+      // Treat candidates as the SAME person when every one is a subset of the
+      // fullest name among them; otherwise two different people match → empty.
+      let fullest = candidates[0];
+      for (const c of candidates) if (c.tokens.length > fullest.tokens.length) fullest = c;
+      const fullestSet = new Set(fullest.tokens);
+      const allSamePerson = candidates.every((c) => c.tokens.every((t) => fullestSet.has(t)));
+      return allSamePerson ? fullest.photo : "";
     },
     [fsPhotoIndex]
   );
