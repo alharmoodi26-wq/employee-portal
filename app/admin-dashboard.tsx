@@ -1428,11 +1428,9 @@ export default function AdminDashboard({
     () => passports.filter((p) => getPassportStatus(p.expiryDate) === "Expiring 12mo"),
     [passports]
   );
+  // Passport Alerts counts ONLY expired passports (not expiring-soon).
   const passportAlerts = useMemo(
-    () => passports.filter((p) => {
-      const s = getPassportStatus(p.expiryDate);
-      return s === "Expired" || s === "Expiring 6mo";
-    }),
+    () => passports.filter((p) => getPassportStatus(p.expiryDate) === "Expired"),
     [passports]
   );
   const filteredSortedPassports = useMemo(() => {
