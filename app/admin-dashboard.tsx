@@ -1511,6 +1511,55 @@ export default function AdminDashboard({
     [fsPhotoIndex]
   );
 
+  // Birthday Monitoring is the source of truth for employee names. Build an
+  // index of Birthday names (exact-normalized + token entries) so Add/Edit
+  // Passport can adopt the existing Birthday name automatically.
+  const bdNameIndex = useMemo(() => {
+    const byExact = new Map<string, string>();
+    const entries: { tokens: string[]; name: string }[] = [];
+    birthdays.forEach((b) => {
+      const n = fsNormalizeName(b.name);
+      if (!n) return;
+      if (!byExact.has(n)) byExact.set(n, b.name);
+      entries.push({ tokens: n.split(" ").filter(Boolean), name: b.name });
+    });
+    return { byExact, entries };
+  }, [birthdays]);
+
+  // Resolve a typed passport name to the EXACT Birthday name when exactly ONE
+  // distinct person is a confident match; otherwise return the name unchanged.
+  // Matching ignores case, punctuation, spacing, middle names and name order
+  // (handles passport-style "LASTNAME, First Middle"). Same logic as getFSPhoto.
+  const standardizePassportName = useCallback(
+    (rawName: string): string => {
+      const name = (rawName || "").trim();
+      const norm = fsNormalizeName(name);
+      if (!norm) return name;
+      const exact = bdNameIndex.byExact.get(norm);
+      if (exact) return exact;
+
+      const tokens = norm.split(" ").filter(Boolean);
+      if (tokens.length < 2) return name;
+      const tokenSet = new Set(tokens);
+      const candidates: { tokens: string[]; name: string }[] = [];
+      for (const e of bdNameIndex.entries) {
+        const eSet = new Set(e.tokens);
+        let overlap = 0;
+        for (const t of tokenSet) if (eSet.has(t)) overlap += 1;
+        const subset =
+          tokens.every((t) => eSet.has(t)) || e.tokens.every((t) => tokenSet.has(t));
+        if (overlap >= 2 && subset) candidates.push(e);
+      }
+      if (candidates.length === 0) return name;
+      let fullest = candidates[0];
+      for (const c of candidates) if (c.tokens.length > fullest.tokens.length) fullest = c;
+      const fullestSet = new Set(fullest.tokens);
+      const samePerson = candidates.every((c) => c.tokens.every((t) => fullestSet.has(t)));
+      return samePerson ? fullest.name : name;
+    },
+    [bdNameIndex]
+  );
+
   const bdDaysUntil = (bStr: string): number => {
     if (!bStr) return 999;
     const today = new Date();
@@ -2696,11 +2745,15 @@ export default function AdminDashboard({
       return;
     }
 
+    // Keep names consistent with Birthday Monitoring (source of truth): if the
+    // employee already exists there, adopt their exact Birthday name.
+    const finalName = standardizePassportName(pForm.name.trim());
+
     try {
       setPSaving(true);
       if (editingPassport && onUpdatePassport) {
         await onUpdatePassport(editingPassport.id, {
-          name: pForm.name.trim(),
+          name: finalName,
           passportNumber: pForm.passportNumber.trim(),
           country: pForm.country.trim(),
           issueDate: pForm.issueDate,
@@ -2712,7 +2765,7 @@ export default function AdminDashboard({
         showToast("success", "Passport record updated successfully.");
       } else if (!editingPassport && onAddPassport) {
         await onAddPassport({
-          name: pForm.name.trim(),
+          name: finalName,
           passportNumber: pForm.passportNumber.trim(),
           country: pForm.country.trim(),
           issueDate: pForm.issueDate,
