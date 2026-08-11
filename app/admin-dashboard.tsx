@@ -440,6 +440,74 @@ function fsNormalizeName(name: string): string {
     .trim();
 }
 
+// ── Birthday countdown helpers (timezone-safe, month/day only) ───────────────
+// A stored birthday is "YYYY-MM-DD". Parsing that with `new Date(str)` treats it
+// as UTC midnight, so reading .getDate()/.getMonth() in a browser west of UTC
+// shifts the birthday back a day. These helpers read the calendar fields from
+// the string directly and do every comparison at LOCAL midnight, so the
+// countdown is stable regardless of the viewer's timezone or the time of day.
+function parseBirthdayMD(
+  bStr?: string
+): { year: number | null; month: number; day: number } | null {
+  if (!bStr) return null;
+  const m = String(bStr).match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) {
+    const year = Number(m[1]);
+    const month = Number(m[2]);
+    const day = Number(m[3]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return { year: year || null, month, day };
+    }
+  }
+  const d = new Date(bStr);
+  if (isNaN(d.getTime())) return null;
+  return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
+}
+
+// Local-midnight Date for a month/day in a given year. An out-of-range day
+// (Feb 29 in a non-leap year) is clamped to the month's last valid day (Feb 28),
+// so leap-year birthdays never roll forward into March.
+function birthdayInYear(month: number, day: number, year: number): Date {
+  const lastDay = new Date(year, month, 0).getDate();
+  return new Date(year, month - 1, Math.min(day, lastDay));
+}
+
+// Whole days from today until the next occurrence of this birthday.
+// 0 = today. Ignores the birth year; passed birthdays roll to next year.
+function birthdayDaysUntil(bStr?: string): number {
+  const md = parseBirthdayMD(bStr);
+  if (!md) return 999;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let target = birthdayInYear(md.month, md.day, today.getFullYear());
+  if (target.getTime() < today.getTime()) {
+    target = birthdayInYear(md.month, md.day, today.getFullYear() + 1);
+  }
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+// Current age from the birth year (returns "—" when no year/invalid).
+function birthdayAge(bStr?: string): string {
+  const md = parseBirthdayMD(bStr);
+  if (!md || !md.year) return "—";
+  const now = new Date();
+  const todayMonth = now.getMonth() + 1;
+  const todayDay = now.getDate();
+  let age = now.getFullYear() - md.year;
+  if (todayMonth < md.month || (todayMonth === md.month && todayDay < md.day)) age -= 1;
+  return age >= 0 ? String(age) : "—";
+}
+
+// "14 August" style label, timezone-safe (year is irrelevant to the label).
+function formatBirthdayLabel(bStr?: string): string {
+  const md = parseBirthdayMD(bStr);
+  if (!md) return bStr || "—";
+  return new Date(2001, md.month - 1, md.day).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "long",
+  });
+}
+
 // Professional fallback avatar (initials on the EIHG navy) as an inline
 // SVG data URI — never a broken-image icon, works in the table and the PDF.
 function fsInitialsAvatar(name: string): string {
@@ -1328,14 +1396,9 @@ export default function AdminDashboard({
     };
   }, [pMenu]);
 
-  const now = new Date();
-  const todayMonthDay = `${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-    now.getDate()
-  ).padStart(2, "0")}`;
-
   const todaysBirthdays = useMemo(() => {
-    return birthdays.filter((item) => item.birthday?.slice(5, 10) === todayMonthDay);
-  }, [birthdays, todayMonthDay]);
+    return birthdays.filter((item) => birthdayDaysUntil(item.birthday) === 0);
+  }, [birthdays]);
 
   const ohcRenewalAlerts = useMemo(() => {
     return ohcCertifications.filter((item) => {
@@ -1558,15 +1621,7 @@ export default function AdminDashboard({
     [bdNameIndex]
   );
 
-  const bdDaysUntil = (bStr: string): number => {
-    if (!bStr) return 999;
-    const today = new Date();
-    const bday = new Date(bStr);
-    if (isNaN(bday.getTime())) return 999;
-    const thisYear = new Date(today.getFullYear(), bday.getMonth(), bday.getDate());
-    const diff = Math.round((thisYear.getTime() - today.getTime()) / 86400000);
-    return diff >= 0 ? diff : Math.round((new Date(today.getFullYear() + 1, bday.getMonth(), bday.getDate()).getTime() - today.getTime()) / 86400000);
-  };
+  const bdDaysUntil = (bStr: string): number => birthdayDaysUntil(bStr);
 
   const sortedBirthdays = useMemo(() =>
     [...birthdays]
@@ -2138,42 +2193,22 @@ export default function AdminDashboard({
     if (!popup) return;
 
     const today = new Date();
-    const todayMonth = today.getMonth();
-    const todayDate  = today.getDate();
+    const todayMonth = today.getMonth(); // 0-indexed, for the month tile
 
-    const calcDaysUntil = (bStr: string): number => {
-      if (!bStr) return 999;
-      const bday = new Date(bStr);
-      if (isNaN(bday.getTime())) return 999;
-      const thisYear = new Date(today.getFullYear(), bday.getMonth(), bday.getDate());
-      const diff = Math.round((thisYear.getTime() - today.getTime()) / 86400000);
-      return diff >= 0 ? diff : Math.round((new Date(today.getFullYear() + 1, bday.getMonth(), bday.getDate()).getTime() - today.getTime()) / 86400000);
-    };
-
-    const calcAge = (bStr: string): string => {
-      if (!bStr) return "—";
-      const bday = new Date(bStr);
-      if (isNaN(bday.getTime())) return "—";
-      let age = today.getFullYear() - bday.getFullYear();
-      if (today.getMonth() < bday.getMonth() || (today.getMonth() === bday.getMonth() && today.getDate() < bday.getDate())) age--;
-      return String(age);
-    };
-
-    const formatBirthday = (bStr: string): string => {
-      if (!bStr) return "—";
-      const bday = new Date(bStr);
-      if (isNaN(bday.getTime())) return bStr;
-      return bday.toLocaleDateString("en-GB", { day: "2-digit", month: "long" });
-    };
+    // Same timezone-safe month/day countdown used across the UI.
+    const calcDaysUntil = (bStr: string): number => birthdayDaysUntil(bStr);
+    const calcAge = (bStr: string): string => birthdayAge(bStr);
+    const formatBirthday = (bStr: string): string => formatBirthdayLabel(bStr);
 
     const sorted = [...birthdays].sort((a, b) => calcDaysUntil(a.birthday) - calcDaysUntil(b.birthday));
-    const todayCount    = sorted.filter(b => { const d = new Date(b.birthday); return !isNaN(d.getTime()) && d.getMonth() === todayMonth && d.getDate() === todayDate; }).length;
+    const todayCount    = sorted.filter(b => calcDaysUntil(b.birthday) === 0).length;
     const nextSevenDays = sorted.filter(b => calcDaysUntil(b.birthday) <= 7).length;
     const monthNames    = ["January","February","March","April","May","June","July","August","September","October","November","December"];
-    const nextUpcoming  = sorted.find(b => { const d = new Date(b.birthday); return !isNaN(d.getTime()); });
-    const tileMonth     = nextUpcoming ? new Date(nextUpcoming.birthday).getMonth() : todayMonth;
+    const nextUpcoming  = sorted.find(b => parseBirthdayMD(b.birthday));
+    const nextUpcomingMD = nextUpcoming ? parseBirthdayMD(nextUpcoming.birthday) : null;
+    const tileMonth     = nextUpcomingMD ? nextUpcomingMD.month - 1 : todayMonth;
     const tileMonthName = monthNames[tileMonth];
-    const thisMonthCount = sorted.filter(b => { const d = new Date(b.birthday); return !isNaN(d.getTime()) && d.getMonth() === tileMonth; }).length;
+    const thisMonthCount = sorted.filter(b => { const md = parseBirthdayMD(b.birthday); return !!md && md.month - 1 === tileMonth; }).length;
 
     const rows = sorted.map((item, idx) => {
       const days     = calcDaysUntil(item.birthday);
