@@ -187,6 +187,10 @@ export type ReportObservationImage = {
   path?: string;
 };
 
+// Whether an observation flags something to fix or celebrates a good practice.
+// Existing reports predate this field — they normalize to "Needs Improvement".
+export type ReportObservationType = "Needs Improvement" | "Positive";
+
 export type ReportObservation = {
   id: string;
   // Legacy single-image fields — kept for backward compatibility and as the
@@ -194,10 +198,24 @@ export type ReportObservation = {
   imageUrl?: string;
   imagePath?: string;
   images?: ReportObservationImage[];
+  // Observation kind. Legacy records omit this and are treated as issues.
+  type: ReportObservationType;
   description: string;
+  // Corrective action — only meaningful for "Needs Improvement" observations.
   recommendation: string;
+  // Only meaningful for "Needs Improvement"; positives keep a value but ignore it.
   priority: ReportPriority;
+  // Optional "Good Practice" note shown only on positive observations.
+  positiveNote?: string;
 };
+
+// Normalizes an observation's type, transparently upgrading legacy records
+// (which have no `type`) to "Needs Improvement" so they keep their old look.
+export function getObservationType(o: {
+  type?: ReportObservationType | string;
+}): ReportObservationType {
+  return o && o.type === "Positive" ? "Positive" : "Needs Improvement";
+}
 
 // Normalizes an observation's images into a single ordered list, transparently
 // upgrading legacy single-image records (imageUrl/imagePath) to the new shape.
@@ -247,6 +265,11 @@ export const REPORT_PRIORITIES: ReportPriority[] = [
   "Medium",
   "High",
   "Critical",
+];
+
+export const REPORT_OBSERVATION_TYPES: ReportObservationType[] = [
+  "Needs Improvement",
+  "Positive",
 ];
 
 export const REPORT_BRANCHES: ReportBranch[] = [

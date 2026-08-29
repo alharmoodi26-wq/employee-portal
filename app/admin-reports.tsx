@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import {
   Report,
+  ReportObservationType,
   ReportPriority,
   ReportStatus,
   REPORT_BRANCHES,
@@ -16,6 +17,7 @@ import {
   escHtml,
   formatDateTime,
   getObservationImages,
+  getObservationType,
   getThemeMode,
   getThemePalette,
   inputStyle,
@@ -40,9 +42,11 @@ export type ReportDraftImage = {
 
 export type ReportObservationDraft = {
   id: string;
+  type: ReportObservationType;
   description: string;
   recommendation: string;
   priority: ReportPriority;
+  positiveNote: string;
   images: ReportDraftImage[];
 };
 
@@ -126,6 +130,65 @@ function priorityBadgeStyle(p: ReportPriority): React.CSSProperties {
   };
 }
 
+// Green "Good Practice" badge for positive observations — shares the pill
+// shape used by the priority/status badges to stay visually consistent.
+function positiveBadgeStyle(): React.CSSProperties {
+  const isDark = getThemeMode() === "dark";
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    padding: "4px 10px",
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+    letterSpacing: "0.02em",
+    background: isDark ? "rgba(16,185,129,0.16)" : "#dcfce7",
+    color: isDark ? "#34d399" : "#166534",
+    border: `1px solid ${isDark ? "rgba(16,185,129,0.35)" : "#86efac"}`,
+  };
+}
+
+// Small count chip used on report cards to summarize the observation mix.
+function miniCountChip(kind: "positive" | "needs"): React.CSSProperties {
+  const isDark = getThemeMode() === "dark";
+  const base: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    padding: "3px 8px",
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  };
+  if (kind === "positive")
+    return {
+      ...base,
+      background: isDark ? "rgba(16,185,129,0.16)" : "#dcfce7",
+      color: isDark ? "#34d399" : "#166534",
+      border: `1px solid ${isDark ? "rgba(16,185,129,0.35)" : "#86efac"}`,
+    };
+  return {
+    ...base,
+    background: isDark ? "rgba(245,158,11,0.14)" : "#fef3c7",
+    color: isDark ? "#fbbf24" : "#92400e",
+    border: `1px solid ${isDark ? "rgba(245,158,11,0.32)" : "#fcd34d"}`,
+  };
+}
+
+// Counts positive vs. needs-improvement observations within one report.
+function observationBreakdown(r: Report) {
+  let positive = 0;
+  let needsImprovement = 0;
+  for (const o of r.observations) {
+    if (getObservationType(o) === "Positive") positive += 1;
+    else needsImprovement += 1;
+  }
+  return { positive, needsImprovement, total: r.observations.length };
+}
+
 function statusBadgeStyle(s: ReportStatus): React.CSSProperties {
   const isDark = getThemeMode() === "dark";
   const base: React.CSSProperties = {
@@ -193,9 +256,11 @@ function emptyDraft(preparedBy: string): ReportDraft {
     observations: [
       {
         id: uuid(),
+        type: "Needs Improvement",
         description: "",
         recommendation: "",
         priority: "Medium",
+        positiveNote: "",
         images: [],
       },
     ],
@@ -212,9 +277,11 @@ function reportToDraft(r: Report): ReportDraft {
     priority: r.priority,
     observations: r.observations.map((o) => ({
       id: o.id,
+      type: getObservationType(o),
       description: o.description,
       recommendation: o.recommendation,
       priority: o.priority,
+      positiveNote: o.positiveNote ?? "",
       images: getObservationImages(o).map((im) => ({
         id: uuid(),
         url: im.url,
@@ -290,7 +357,21 @@ export default function AdminReports({
       (r) => r.priority === "High" || r.priority === "Critical"
     ).length;
     const drafts = liveReports.filter((r) => r.status === "Draft").length;
-    return { total: liveReports.length, thisMonth, highOrCritical, drafts };
+    let positiveObs = 0;
+    let needsImprovementObs = 0;
+    for (const r of liveReports) {
+      const b = observationBreakdown(r);
+      positiveObs += b.positive;
+      needsImprovementObs += b.needsImprovement;
+    }
+    return {
+      total: liveReports.length,
+      thisMonth,
+      highOrCritical,
+      drafts,
+      positiveObs,
+      needsImprovementObs,
+    };
   }, [liveReports]);
 
   const selectedReport: Report | null = useMemo(() => {
@@ -375,6 +456,16 @@ export default function AdminReports({
             title="This Month"
             value={stats.thisMonth}
             hint="Visits this month"
+          />
+          <StatBox
+            title="Needs Improvement"
+            value={stats.needsImprovementObs}
+            hint="Issues logged"
+          />
+          <StatBox
+            title="Positive Observations"
+            value={stats.positiveObs}
+            hint="Good practices"
           />
           <StatBox
             title="High / Critical"
@@ -615,6 +706,7 @@ function ReportCard({
   const theme = getThemePalette();
   const cover = getCoverImage(report);
   const obsCount = report.observations.length;
+  const breakdown = observationBreakdown(report);
 
   return (
     <div
@@ -749,6 +841,21 @@ function ReportCard({
             {obsCount} observation{obsCount === 1 ? "" : "s"}
           </span>
         </div>
+        {/* Positive / needs-improvement breakdown chips */}
+        {obsCount > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {breakdown.needsImprovement > 0 && (
+              <span style={miniCountChip("needs")}>
+                ⚠ {breakdown.needsImprovement} Needs Improvement
+              </span>
+            )}
+            {breakdown.positive > 0 && (
+              <span style={miniCountChip("positive")}>
+                ✓ {breakdown.positive} Positive
+              </span>
+            )}
+          </div>
+        )}
         <div
           style={{
             fontSize: 11,
@@ -875,9 +982,11 @@ function ReportForm({
         ...d.observations,
         {
           id: uuid(),
+          type: "Needs Improvement",
           description: "",
           recommendation: "",
           priority: "Medium",
+          positiveNote: "",
           images: [],
         },
       ],
@@ -1216,42 +1325,8 @@ function ReportForm({
                 )}
               </div>
 
-              {/* Fields */}
-              <textarea
-                value={obs.description}
-                onChange={(e) =>
-                  updateObs(obs.id, { description: e.target.value })
-                }
-                placeholder="Describe what you observed…"
-                rows={3}
-                style={{
-                  ...inputStyle(),
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                  lineHeight: 1.5,
-                }}
-              />
-              <textarea
-                value={obs.recommendation}
-                onChange={(e) =>
-                  updateObs(obs.id, { recommendation: e.target.value })
-                }
-                placeholder="Recommended action / corrective measure…"
-                rows={3}
-                style={{
-                  ...inputStyle(),
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                  lineHeight: 1.5,
-                }}
-              />
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                }}
-              >
+              {/* Observation type — issue vs. good practice */}
+              <div style={{ display: "grid", gap: 6 }}>
                 <span
                   style={{
                     fontSize: 12,
@@ -1259,27 +1334,126 @@ function ReportForm({
                     fontWeight: 700,
                   }}
                 >
-                  Priority
+                  Observation type
                 </span>
-                <select
-                  value={obs.priority}
-                  onChange={(e) =>
-                    updateObs(obs.id, {
-                      priority: e.target.value as ReportPriority,
-                    })
-                  }
-                  style={{ ...selectStyle(), width: "auto", flex: 1 }}
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 8,
+                  }}
                 >
-                  {REPORT_PRIORITIES.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-                <span style={priorityBadgeStyle(obs.priority)}>
-                  {obs.priority}
-                </span>
+                  <ObsTypeButton
+                    active={obs.type !== "Positive"}
+                    onClick={() =>
+                      updateObs(obs.id, { type: "Needs Improvement" })
+                    }
+                    label="⚠ Needs Improvement"
+                    activeColor="#d97706"
+                  />
+                  <ObsTypeButton
+                    active={obs.type === "Positive"}
+                    onClick={() => updateObs(obs.id, { type: "Positive" })}
+                    label="✓ Positive / Good Practice"
+                    activeColor="#16a34a"
+                  />
+                </div>
               </div>
+
+              {/* Fields */}
+              <textarea
+                value={obs.description}
+                onChange={(e) =>
+                  updateObs(obs.id, { description: e.target.value })
+                }
+                placeholder={
+                  obs.type === "Positive"
+                    ? "Describe the good practice you observed…"
+                    : "Describe what you observed…"
+                }
+                rows={3}
+                style={{
+                  ...inputStyle(),
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                  lineHeight: 1.5,
+                }}
+              />
+
+              {obs.type === "Positive" ? (
+                /* Positive → optional good-practice note; no corrective
+                   action or priority (not relevant for positives). */
+                <>
+                  <span style={positiveBadgeStyle()}>✓ Good Practice</span>
+                  <textarea
+                    value={obs.positiveNote}
+                    onChange={(e) =>
+                      updateObs(obs.id, { positiveNote: e.target.value })
+                    }
+                    placeholder="Positive Note / Good Practice (optional) — why this stands out…"
+                    rows={2}
+                    style={{
+                      ...inputStyle(),
+                      resize: "vertical",
+                      fontFamily: "inherit",
+                      lineHeight: 1.5,
+                    }}
+                  />
+                </>
+              ) : (
+                /* Needs Improvement → unchanged corrective action + priority. */
+                <>
+                  <textarea
+                    value={obs.recommendation}
+                    onChange={(e) =>
+                      updateObs(obs.id, { recommendation: e.target.value })
+                    }
+                    placeholder="Recommended action / corrective measure…"
+                    rows={3}
+                    style={{
+                      ...inputStyle(),
+                      resize: "vertical",
+                      fontFamily: "inherit",
+                      lineHeight: 1.5,
+                    }}
+                  />
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: theme.subtleText,
+                        fontWeight: 700,
+                      }}
+                    >
+                      Priority
+                    </span>
+                    <select
+                      value={obs.priority}
+                      onChange={(e) =>
+                        updateObs(obs.id, {
+                          priority: e.target.value as ReportPriority,
+                        })
+                      }
+                      style={{ ...selectStyle(), width: "auto", flex: 1 }}
+                    >
+                      {REPORT_PRIORITIES.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                    <span style={priorityBadgeStyle(obs.priority)}>
+                      {obs.priority}
+                    </span>
+                  </div>
+                </>
+              )}
 
               {/* Photos gallery */}
               <div style={{ display: "grid", gap: 8 }}>
@@ -1855,6 +2029,28 @@ function ReportDetail({
             Observations &amp; Findings
           </div>
 
+          {report.observations.length > 0 &&
+            (() => {
+              const b = observationBreakdown(report);
+              return (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    marginBottom: 18,
+                  }}
+                >
+                  <span style={detailCountPill("needs")}>
+                    ⚠ {b.needsImprovement} Needs Improvement
+                  </span>
+                  <span style={detailCountPill("positive")}>
+                    ✓ {b.positive} Positive
+                  </span>
+                </div>
+              );
+            })()}
+
           {report.observations.length === 0 ? (
             <div
               style={{
@@ -1870,12 +2066,14 @@ function ReportDetail({
             </div>
           ) : (
             <div style={{ display: "grid", gap: 18 }}>
-              {report.observations.map((o, idx) => (
+              {report.observations.map((o, idx) => {
+                const isPositive = getObservationType(o) === "Positive";
+                return (
                 <div
                   key={o.id}
                   className="report-observation-print"
                   style={{
-                    border: "1px solid #e2e8f0",
+                    border: `1px solid ${isPositive ? "#bbf7d0" : "#e2e8f0"}`,
                     borderRadius: 12,
                     overflow: "hidden",
                     background: "#ffffff",
@@ -1888,8 +2086,10 @@ function ReportDetail({
                       justifyContent: "space-between",
                       alignItems: "center",
                       padding: "10px 16px",
-                      background: "#f1f5f9",
-                      borderBottom: "1px solid #e2e8f0",
+                      background: isPositive ? "#f0fdf4" : "#f1f5f9",
+                      borderBottom: `1px solid ${
+                        isPositive ? "#bbf7d0" : "#e2e8f0"
+                      }`,
                     }}
                   >
                     <div
@@ -1902,9 +2102,15 @@ function ReportDetail({
                     >
                       OBSERVATION #{String(idx + 1).padStart(2, "0")}
                     </div>
-                    <span style={priorityBadgeStyle(o.priority)}>
-                      {o.priority} Priority
-                    </span>
+                    {isPositive ? (
+                      <span style={positiveBadgeStyle()}>
+                        ✓ Positive / Good Practice
+                      </span>
+                    ) : (
+                      <span style={priorityBadgeStyle(o.priority)}>
+                        {o.priority} Priority
+                      </span>
+                    )}
                   </div>
 
                   {(() => {
@@ -1954,14 +2160,25 @@ function ReportDetail({
 
                   <div style={{ padding: 16, display: "grid", gap: 14 }}>
                     <LabeledBlock label="Description" value={o.description} />
-                    <LabeledBlock
-                      label="Recommendation / Corrective Action"
-                      value={o.recommendation}
-                      accent
-                    />
+                    {isPositive
+                      ? (o.positiveNote ?? "").trim() && (
+                          <LabeledBlock
+                            label="Positive Note / Good Practice"
+                            value={o.positiveNote ?? ""}
+                            positive
+                          />
+                        )
+                      : (
+                          <LabeledBlock
+                            label="Recommendation / Corrective Action"
+                            value={o.recommendation}
+                            accent
+                          />
+                        )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -2033,6 +2250,42 @@ function SectionHeader({
         {title}
       </div>
     </div>
+  );
+}
+
+// Segmented toggle button used to pick an observation's type in the editor.
+function ObsTypeButton({
+  active,
+  onClick,
+  label,
+  activeColor,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  activeColor: string;
+}) {
+  const theme = getThemePalette();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "10px 12px",
+        borderRadius: 12,
+        border: `1.5px solid ${active ? activeColor : theme.cardBorder}`,
+        background: active ? `${activeColor}1a` : theme.inputBg,
+        color: active ? activeColor : theme.subtleText,
+        cursor: "pointer",
+        fontSize: 12.5,
+        fontWeight: 800,
+        letterSpacing: "0.01em",
+        transition: "all 0.15s ease",
+        textAlign: "center",
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -2124,18 +2377,22 @@ function LabeledBlock({
   label,
   value,
   accent,
+  positive,
 }: {
   label: string;
   value: string;
   accent?: boolean;
+  positive?: boolean;
 }) {
+  const boxed = accent || positive;
+  const themeColor = positive ? "#166534" : "#4338ca";
   return (
     <div>
       <div
         style={{
           fontSize: 10,
           fontWeight: 800,
-          color: accent ? "#4338ca" : "#64748b",
+          color: boxed ? themeColor : "#64748b",
           textTransform: "uppercase",
           letterSpacing: "0.08em",
           marginBottom: 6,
@@ -2149,16 +2406,43 @@ function LabeledBlock({
           color: "#0f172a",
           lineHeight: 1.6,
           whiteSpace: "pre-wrap",
-          background: accent ? "#eef2ff" : "transparent",
-          padding: accent ? "10px 12px" : 0,
-          borderRadius: accent ? 8 : 0,
-          borderLeft: accent ? "3px solid #4338ca" : "none",
+          background: positive ? "#f0fdf4" : accent ? "#eef2ff" : "transparent",
+          padding: boxed ? "10px 12px" : 0,
+          borderRadius: boxed ? 8 : 0,
+          borderLeft: boxed ? `3px solid ${themeColor}` : "none",
         }}
       >
         {value || "—"}
       </div>
     </div>
   );
+}
+
+// Count pill used in the on-screen report detail summary row.
+function detailCountPill(kind: "positive" | "needs"): React.CSSProperties {
+  const base: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "5px 12px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+  };
+  if (kind === "positive")
+    return {
+      ...base,
+      background: "#dcfce7",
+      color: "#166534",
+      border: "1px solid #86efac",
+    };
+  return {
+    ...base,
+    background: "#fef3c7",
+    color: "#92400e",
+    border: "1px solid #fcd34d",
+  };
 }
 
 // ── Print: opens a new window with isolated, A4-ready HTML ─────────────
@@ -2185,14 +2469,22 @@ function printReport(report: Report) {
   const overallP = priorityColor(report.priority);
   const overallS = statusColor(report.status);
 
+  // Green palette for positive / good-practice observations.
+  const positiveColor = { bg: "#dcfce7", fg: "#166534", bd: "#86efac" };
+
   const total = report.observations.length;
+  const positiveCount = report.observations.filter(
+    (o) => getObservationType(o) === "Positive"
+  ).length;
+  const needsCount = total - positiveCount;
   const generatedAt = formatDateTime(report.createdAt) || "—";
   const logoUrl =
     typeof window !== "undefined"
       ? `${window.location.origin}/eihg-logo.jpeg`
       : "/eihg-logo.jpeg";
 
-  // Priority distribution for the executive summary.
+  // Priority distribution for the executive summary — issues only; positive
+  // observations have no meaningful priority and are excluded here.
   const order: ReportPriority[] = ["Critical", "High", "Medium", "Low"];
   const counts: Record<ReportPriority, number> = {
     Critical: 0,
@@ -2201,6 +2493,7 @@ function printReport(report: Report) {
     Low: 0,
   };
   report.observations.forEach((o) => {
+    if (getObservationType(o) === "Positive") return;
     counts[o.priority] = (counts[o.priority] || 0) + 1;
   });
   // Cover = page 1, Executive Summary = page 2, observations start at page 3.
@@ -2209,7 +2502,7 @@ function printReport(report: Report) {
   const priorityBars = order
     .map((p) => {
       const n = counts[p];
-      const pct = total > 0 ? Math.round((n / total) * 100) : 0;
+      const pct = needsCount > 0 ? Math.round((n / needsCount) * 100) : 0;
       const c = priorityColor(p);
       return `
         <div class="bar-row">
@@ -2222,11 +2515,13 @@ function printReport(report: Report) {
 
   const summaryRows = report.observations
     .map((o, idx) => {
-      const c = priorityColor(o.priority);
+      const isPositive = getObservationType(o) === "Positive";
+      const c = isPositive ? positiveColor : priorityColor(o.priority);
+      const label = isPositive ? "Positive" : escHtml(o.priority);
       return `
         <tr>
           <td class="t-no">${String(idx + 1).padStart(2, "0")}</td>
-          <td><span class="pill" style="background:${c.bg};color:${c.fg};border-color:${c.bd}">${escHtml(o.priority)}</span></td>
+          <td><span class="pill" style="background:${c.bg};color:${c.fg};border-color:${c.bd}">${label}</span></td>
           <td class="t-pg">${pageOf(idx)}</td>
         </tr>`;
     })
@@ -2234,7 +2529,8 @@ function printReport(report: Report) {
 
   const observationsHtml = report.observations
     .map((o, idx) => {
-      const pc = priorityColor(o.priority);
+      const isPositive = getObservationType(o) === "Positive";
+      const pc = isPositive ? positiveColor : priorityColor(o.priority);
       const imgs = getObservationImages(o);
       const layout =
         imgs.length === 1 ? "one" : imgs.length === 2 ? "two" : "grid";
@@ -2247,11 +2543,28 @@ function printReport(report: Report) {
               )
               .join("")}</div>`
           : "";
+      const headPill = isPositive
+        ? `<span class="pill" style="background:${pc.bg};color:${pc.fg};border-color:${pc.bd}">✓ Positive / Good Practice</span>`
+        : `<span class="pill" style="background:${pc.bg};color:${pc.fg};border-color:${pc.bd}">${escHtml(o.priority)} Priority</span>`;
+      // Positive → optional green "Good Practice" note (omitted when empty).
+      // Needs Improvement → the usual indigo corrective-action block.
+      const note = (o.positiveNote ?? "").trim();
+      const detailBlock = isPositive
+        ? note
+          ? `<div class="good">
+              <div class="good-head"><span class="rec-icon">✓</span>Positive Note / Good Practice</div>
+              <div class="rec-body">${escHtml(note).replace(/\n/g, "<br>")}</div>
+            </div>`
+          : ""
+        : `<div class="rec">
+              <div class="rec-head"><span class="rec-icon">💡</span>Recommendation / Corrective Action</div>
+              <div class="rec-body">${escHtml(o.recommendation).replace(/\n/g, "<br>") || "—"}</div>
+            </div>`;
       return `
         <section class="obs-page">
-          <header class="obs-head">
+          <header class="obs-head${isPositive ? " obs-head-positive" : ""}">
             <div class="obs-no">OBSERVATION <span class="obs-num">${String(idx + 1).padStart(2, "0")}</span> <span class="obs-of">/ ${String(total).padStart(2, "0")}</span></div>
-            <span class="pill" style="background:${pc.bg};color:${pc.fg};border-color:${pc.bd}">${escHtml(o.priority)} Priority</span>
+            ${headPill}
           </header>
           ${photos}
           <div class="obs-body">
@@ -2259,10 +2572,7 @@ function printReport(report: Report) {
               <div class="lbl">Description</div>
               <div class="val">${escHtml(o.description).replace(/\n/g, "<br>") || "—"}</div>
             </div>
-            <div class="rec">
-              <div class="rec-head"><span class="rec-icon">💡</span>Recommendation / Corrective Action</div>
-              <div class="rec-body">${escHtml(o.recommendation).replace(/\n/g, "<br>") || "—"}</div>
-            </div>
+            ${detailBlock}
           </div>
         </section>
       `;
@@ -2434,6 +2744,12 @@ function printReport(report: Report) {
     gap: 10px;
     margin-bottom: 18px;
   }
+  .exec-split {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 18px;
+  }
   .exec-tile {
     border: 1px solid #e2e8f0;
     border-radius: 10px;
@@ -2479,6 +2795,10 @@ function printReport(report: Report) {
     border-left: 4px solid #f0c040;
     page-break-after: avoid;
     break-after: avoid;
+  }
+  .obs-head-positive {
+    background: linear-gradient(135deg, #14532d 0%, #166534 100%);
+    border-left: 4px solid #86efac;
   }
   .obs-no { font-size: 11px; font-weight: 800; letter-spacing: 0.12em; color: #cbd5e1; }
   .obs-no .obs-num { font-size: 15px; font-weight: 900; color: #fff; letter-spacing: 0.04em; }
@@ -2528,6 +2848,21 @@ function printReport(report: Report) {
     padding: 13px 15px;
     page-break-inside: avoid;
     break-inside: avoid;
+  }
+  .good {
+    margin-top: 16px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-left: 4px solid #16a34a;
+    border-radius: 10px;
+    padding: 13px 15px;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .good-head {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 10px; font-weight: 900; color: #166534;
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 7px;
   }
   .rec-head {
     display: flex; align-items: center; gap: 7px;
@@ -2661,9 +2996,17 @@ function printReport(report: Report) {
     <div class="summary-page">
       <div class="section-title">Executive Summary</div>
       <div class="exec-intro">
-        This report documents <strong>${total} observation${total === 1 ? "" : "s"}</strong> recorded during a field visit to <strong>${escHtml(report.branchName)}</strong> on <strong>${escHtml(report.visitDate)}</strong>, prepared by <strong>${escHtml(report.preparedBy)}</strong>. Each observation is detailed on its own page with supporting photographs and a recommended corrective action.
+        This report documents <strong>${total} observation${total === 1 ? "" : "s"}</strong> recorded during a field visit to <strong>${escHtml(report.branchName)}</strong> on <strong>${escHtml(report.visitDate)}</strong>, prepared by <strong>${escHtml(report.preparedBy)}</strong> — <strong>${needsCount} needing improvement</strong> and <strong>${positiveCount} positive / good practice${positiveCount === 1 ? "" : "s"}</strong>. Each observation is detailed on its own page with supporting photographs.
       </div>
 
+      <div class="exec-split">
+        <div class="exec-tile" style="--c:#d97706"><div class="tn">${needsCount}</div><div class="tk">Needs Improvement</div></div>
+        <div class="exec-tile" style="--c:#16a34a"><div class="tn">${positiveCount}</div><div class="tk">Positive Observations</div></div>
+      </div>
+
+      ${
+        needsCount > 0
+          ? `<div class="section-title">Needs-Improvement Priority</div>
       <div class="exec-tiles">
         <div class="exec-tile" style="--c:#dc2626"><div class="tn">${counts.Critical}</div><div class="tk">Critical</div></div>
         <div class="exec-tile" style="--c:#ea580c"><div class="tn">${counts.High}</div><div class="tk">High</div></div>
@@ -2672,11 +3015,13 @@ function printReport(report: Report) {
       </div>
 
       <div class="section-title">Priority Distribution</div>
-      <div class="bars">${priorityBars}</div>
+      <div class="bars">${priorityBars}</div>`
+          : ""
+      }
 
       <div class="section-title">Observation Index</div>
       <table class="index-table">
-        <thead><tr><th>Observation</th><th>Priority</th><th>Page</th></tr></thead>
+        <thead><tr><th>Observation</th><th>Type / Priority</th><th>Page</th></tr></thead>
         <tbody>${summaryRows || '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">No observations recorded.</td></tr>'}</tbody>
       </table>
     </div>

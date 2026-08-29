@@ -1506,11 +1506,17 @@ export default function HomePage() {
                     : legacyUrl
                     ? [{ url: legacyUrl, path: legacyPath }]
                     : [],
+                // Legacy records have no `type` → treated as "Needs Improvement".
+                type: o.type === "Positive" ? "Positive" : "Needs Improvement",
                 description:
                   typeof o.description === "string" ? o.description : "",
                 recommendation:
                   typeof o.recommendation === "string" ? o.recommendation : "",
                 priority: validPriority(o.priority),
+                positiveNote:
+                  typeof o.positiveNote === "string"
+                    ? o.positiveNote
+                    : undefined,
               };
             }
           );
@@ -2773,12 +2779,21 @@ export default function HomePage() {
           images.push(entry);
         }
       }
+      const isPositive = o.type === "Positive";
       const obs: ReportObservation = {
         id: o.id,
+        type: isPositive ? "Positive" : "Needs Improvement",
         description: o.description.trim(),
-        recommendation: o.recommendation.trim(),
-        priority: o.priority,
+        // Corrective action & priority are only meaningful for issues; a
+        // positive observation clears the recommendation and keeps a neutral
+        // priority so downstream code never treats it as High/Critical.
+        recommendation: isPositive ? "" : o.recommendation.trim(),
+        priority: isPositive ? "Low" : o.priority,
       };
+      if (isPositive) {
+        const note = (o.positiveNote ?? "").trim();
+        if (note) obs.positiveNote = note;
+      }
       if (images.length > 0) {
         obs.images = images;
         obs.imageUrl = images[0].url;
