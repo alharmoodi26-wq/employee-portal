@@ -25,7 +25,6 @@ import {
   selectStyle,
   smallButtonStyle,
   softCardStyle,
-  StatBox,
   SkeletonCard,
   ToastType,
 } from "./portal-utils";
@@ -137,6 +136,16 @@ function priorityBadgeStyle(p: ReportPriority): React.CSSProperties {
     color: isDark ? "#cbd5e1" : "#475569",
     border: `1px solid ${isDark ? "rgba(100,116,139,0.35)" : "#e2e8f0"}`,
   };
+}
+
+// Solid accent color for a report's overall priority — used for the colored
+// left border of report list rows (mirrors the HR page card pattern).
+function priorityAccent(p: ReportPriority): string {
+  if (p === "Critical") return "#ef4444";
+  if (p === "High") return "#f97316";
+  if (p === "Medium") return "#f59e0b";
+  if (p === "Positive") return "#16a34a";
+  return "#64748b"; // Low
 }
 
 // Green "Good Practice" badge for positive observations — shares the pill
@@ -362,10 +371,6 @@ export default function AdminReports({
       const [y, m] = r.visitDate.split("-").map(Number);
       return y === now.getFullYear() && m === now.getMonth() + 1;
     }).length;
-    const highOrCritical = liveReports.filter(
-      (r) => r.priority === "High" || r.priority === "Critical"
-    ).length;
-    const drafts = liveReports.filter((r) => r.status === "Draft").length;
     let positiveObs = 0;
     let needsImprovementObs = 0;
     for (const r of liveReports) {
@@ -376,8 +381,6 @@ export default function AdminReports({
     return {
       total: liveReports.length,
       thisMonth,
-      highOrCritical,
-      drafts,
       positiveObs,
       needsImprovementObs,
     };
@@ -392,8 +395,22 @@ export default function AdminReports({
 
   // ── List view ─────────────────────────────────────────────────────────
   if (mode.kind === "list") {
+    const filtersActive =
+      !!search ||
+      branchFilter !== "All" ||
+      statusFilter !== "All" ||
+      !!dateFrom ||
+      !!dateTo;
+    const resetFilters = () => {
+      setSearch("");
+      setBranchFilter("All");
+      setStatusFilter("All");
+      setDateFrom("");
+      setDateTo("");
+    };
+
     return (
-      <div style={{ display: "grid", gap: 22 }}>
+      <div style={{ display: "grid", gap: 16 }}>
         {/* Header + New */}
         <div
           style={{
@@ -404,40 +421,21 @@ export default function AdminReports({
             flexWrap: "wrap",
           }}
         >
-          <div>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: theme.subtleText,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                marginBottom: 6,
-              }}
-            >
-              Field Visit Reports
-            </div>
-            <div
-              style={{
-                fontSize: 14,
-                color: theme.mutedText,
-                maxWidth: 560,
-              }}
-            >
-              Document branch visits, observations, and corrective actions —
-              ready to print on an official EIHG letterhead.
-            </div>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: theme.subtleText,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+            }}
+          >
+            Field Visit Reports
           </div>
           <button
             onClick={() => setMode({ kind: "create" })}
             style={{
               ...buttonStyle(true),
-              background:
-                "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
-              color: "#fff",
-              boxShadow: "0 10px 22px rgba(99,102,241,0.32)",
-              fontSize: 14,
-              padding: "11px 18px",
               display: "inline-flex",
               alignItems: "center",
               gap: 8,
@@ -448,65 +446,62 @@ export default function AdminReports({
           </button>
         </div>
 
-        {/* Stats */}
+        {/* Summary tiles — HR-style top-accent cards */}
         <div
           className="reports-stat-grid"
-          style={{
-            display: "grid",
-            gap: 14,
-          }}
+          style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}
         >
-          <StatBox
-            title="Total Reports"
-            value={stats.total}
-            hint="All non-deleted"
-          />
-          <StatBox
-            title="This Month"
-            value={stats.thisMonth}
-            hint="Visits this month"
-          />
-          <StatBox
-            title="Needs Improvement"
-            value={stats.needsImprovementObs}
-            hint="Issues logged"
-          />
-          <StatBox
-            title="Positive Observations"
-            value={stats.positiveObs}
-            hint="Good practices"
-          />
-          <StatBox
-            title="High / Critical"
-            value={stats.highOrCritical}
-            hint="Need attention"
-          />
-          <StatBox
-            title="Drafts"
-            value={stats.drafts}
-            hint="Not yet submitted"
-          />
+          {[
+            { label: "Total Reports", value: stats.total, color: "#6366f1", icon: "📑" },
+            { label: "This Month", value: stats.thisMonth, color: "#3b82f6", icon: "📅" },
+            { label: "Positive", value: stats.positiveObs, color: "#16a34a", icon: "✓" },
+            { label: "Needs Improvement", value: stats.needsImprovementObs, color: "#f59e0b", icon: "⚠" },
+          ].map(({ label, value, color, icon }) => (
+            <div
+              key={label}
+              style={{
+                background: theme.cardBackground,
+                borderTop: `3px solid ${color}`,
+                borderLeft: `1px solid ${theme.cardBorder}`,
+                borderRight: `1px solid ${theme.cardBorder}`,
+                borderBottom: `1px solid ${theme.cardBorder}`,
+                borderRadius: 12,
+                padding: "14px 16px",
+              }}
+            >
+              <div style={{ fontSize: 20, marginBottom: 6 }}>{icon}</div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: theme.subtleText,
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  marginBottom: 4,
+                }}
+              >
+                {label}
+              </div>
+              <div style={{ fontSize: 26, fontWeight: 900, color, lineHeight: 1 }}>
+                {value}
+              </div>
+            </div>
+          ))}
         </div>
 
-        {/* Filters */}
-        <div style={{ ...cardStyle(), padding: 16 }}>
-          <div
-            style={{
-              display: "grid",
-              gap: 10,
-            }}
-            className="reports-filter-grid"
-          >
+        {/* Filters — compact action bar */}
+        <div style={{ ...cardStyle(), padding: "12px 14px", display: "grid", gap: 10 }}>
+          <div className="reports-filter-grid" style={{ display: "grid", gap: 10 }}>
             <input
-              placeholder="🔍 Search by title, RPT-number, branch, preparer…"
+              placeholder="🔍  Search by title, number, branch, preparer…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              style={{ ...inputStyle(), padding: "10px 12px" }}
+              style={{ ...inputStyle(), minWidth: 0 }}
             />
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}
-              style={{ ...selectStyle(), padding: "10px 10px" }}
+              style={{ ...selectStyle(), minWidth: 0 }}
             >
               <option value="All">All branches</option>
               {REPORT_BRANCHES.map((b) => (
@@ -518,7 +513,7 @@ export default function AdminReports({
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              style={{ ...selectStyle(), padding: "10px 10px" }}
+              style={{ ...selectStyle(), minWidth: 0 }}
             >
               <option value="All">All statuses</option>
               {REPORT_STATUSES.map((s) => (
@@ -531,28 +526,23 @@ export default function AdminReports({
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              style={{ ...inputStyle(), padding: "10px 12px" }}
+              style={{ ...inputStyle(), minWidth: 0 }}
               title="Visit date from"
             />
             <input
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              style={{ ...inputStyle(), padding: "10px 12px" }}
+              style={{ ...inputStyle(), minWidth: 0 }}
               title="Visit date to"
             />
           </div>
-          {(search ||
-            branchFilter !== "All" ||
-            statusFilter !== "All" ||
-            dateFrom ||
-            dateTo) && (
+          {filtersActive && (
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                marginTop: 10,
                 fontSize: 12,
                 color: theme.subtleText,
               }}
@@ -562,13 +552,7 @@ export default function AdminReports({
                 report{liveReports.length === 1 ? "" : "s"}
               </span>
               <button
-                onClick={() => {
-                  setSearch("");
-                  setBranchFilter("All");
-                  setStatusFilter("All");
-                  setDateFrom("");
-                  setDateTo("");
-                }}
+                onClick={resetFilters}
                 style={{
                   border: "none",
                   background: "transparent",
@@ -584,17 +568,11 @@ export default function AdminReports({
           )}
         </div>
 
-        {/* Cards grid */}
+        {/* Reports list */}
         {loading ? (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
-              gap: 14,
-            }}
-          >
+          <div style={{ display: "grid", gap: 10 }}>
             {[0, 1, 2, 3].map((i) => (
-              <SkeletonCard key={i} rows={4} />
+              <SkeletonCard key={i} rows={2} />
             ))}
           </div>
         ) : filtered.length === 0 ? (
@@ -612,14 +590,7 @@ export default function AdminReports({
             }
           />
         ) : (
-          <div
-            className="reports-grid"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))",
-              gap: 16,
-            }}
-          >
+          <div className="reports-grid" style={{ display: "grid", gap: 10 }}>
             {filtered.map((r) => (
               <ReportCard
                 key={r.id}
@@ -700,7 +671,7 @@ export default function AdminReports({
   return null;
 }
 
-// ── Report card (list grid) ────────────────────────────────────────────
+// ── Report card (list row — HR page style) ─────────────────────────────
 function ReportCard({
   report,
   onView,
@@ -716,209 +687,179 @@ function ReportCard({
   const cover = getCoverImage(report);
   const obsCount = report.observations.length;
   const breakdown = observationBreakdown(report);
+  const accent = priorityAccent(report.priority);
+
+  const iconBtn: React.CSSProperties = {
+    ...smallButtonStyle(),
+    width: 34,
+    height: 34,
+    padding: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 14,
+  };
 
   return (
     <div
+      className="report-row"
       style={{
-        ...cardStyle(),
-        padding: 0,
+        background: theme.cardBackground,
+        border: `1px solid ${theme.cardBorder}`,
+        borderLeft: `4px solid ${accent}`,
+        borderRadius: 12,
         overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        transition: "transform 0.2s ease, box-shadow 0.2s ease",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.transform = "translateY(-3px)";
-        e.currentTarget.style.boxShadow = "0 22px 44px rgba(15,23,42,0.12)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = "translateY(0)";
-        e.currentTarget.style.boxShadow = theme.cardShadow;
       }}
     >
-      {/* Cover */}
       <div
-        onClick={onView}
         style={{
-          height: 160,
-          position: "relative",
-          cursor: "pointer",
-          background: cover
-            ? "#0f172a"
-            : "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          overflow: "hidden",
+          gap: 12,
+          padding: "12px 14px",
         }}
       >
-        {cover ? (
-          <Image
-            src={cover}
-            alt={report.title}
-            fill
-            sizes="(max-width: 768px) 100vw, 320px"
-            style={{ objectFit: "cover" }}
-            unoptimized
-          />
-        ) : (
+        {/* Cover thumbnail */}
+        <div
+          onClick={onView}
+          title="View report"
+          style={{
+            position: "relative",
+            width: 60,
+            height: 60,
+            borderRadius: 10,
+            flexShrink: 0,
+            cursor: "pointer",
+            overflow: "hidden",
+            background: cover
+              ? "#0f172a"
+              : "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          {cover ? (
+            <Image
+              src={cover}
+              alt={report.title}
+              fill
+              sizes="60px"
+              style={{ objectFit: "cover" }}
+              unoptimized
+            />
+          ) : (
+            <span style={{ fontSize: 24, opacity: 0.7 }}>📑</span>
+          )}
+        </div>
+
+        {/* Main info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              color: "#fff",
-              fontSize: 38,
-              fontWeight: 900,
-              opacity: 0.55,
-              letterSpacing: "-0.04em",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+              marginBottom: 3,
             }}
           >
-            📑
-          </div>
-        )}
-        <div
-          style={{
-            position: "absolute",
-            top: 10,
-            left: 10,
-            background: "rgba(15,23,42,0.78)",
-            color: "#fff",
-            padding: "3px 9px",
-            borderRadius: 8,
-            fontSize: 10,
-            fontWeight: 800,
-            letterSpacing: "0.05em",
-            fontFamily: "var(--font-geist-mono), monospace",
-          }}
-        >
-          {report.reportNumber}
-        </div>
-        <div
-          style={{
-            position: "absolute",
-            top: 10,
-            right: 10,
-            display: "flex",
-            gap: 6,
-          }}
-        >
-          <span style={priorityBadgeStyle(report.priority)}>
-            {report.priority}
-          </span>
-        </div>
-      </div>
-
-      {/* Body */}
-      <div style={{ padding: 16, display: "grid", gap: 8, flex: 1 }}>
-        <div
-          onClick={onView}
-          style={{
-            fontSize: 15,
-            fontWeight: 800,
-            color: theme.title,
-            cursor: "pointer",
-            lineHeight: 1.35,
-            display: "-webkit-box",
-            WebkitBoxOrient: "vertical",
-            WebkitLineClamp: 2,
-            overflow: "hidden",
-          }}
-        >
-          {report.title || "(Untitled report)"}
-        </div>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontSize: 12,
-            color: theme.subtleText,
-          }}
-        >
-          <span>🏬 {report.branchName}</span>
-          <span style={statusBadgeStyle(report.status)}>{report.status}</span>
-        </div>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            fontSize: 12,
-            color: theme.subtleText,
-          }}
-        >
-          <span>📅 {report.visitDate || "—"}</span>
-          <span>
-            {obsCount} observation{obsCount === 1 ? "" : "s"}
-          </span>
-        </div>
-        {/* Positive / needs-improvement breakdown chips */}
-        {obsCount > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {breakdown.needsImprovement > 0 && (
-              <span style={miniCountChip("needs")}>
-                ⚠ {breakdown.needsImprovement} Needs Improvement
-              </span>
-            )}
-            {breakdown.positive > 0 && (
-              <span style={miniCountChip("positive")}>
-                ✓ {breakdown.positive} Positive
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: "0.04em",
+                color: theme.subtleText,
+                fontFamily: "var(--font-geist-mono), monospace",
+              }}
+            >
+              {report.reportNumber}
+            </span>
+            <span style={statusBadgeStyle(report.status)}>{report.status}</span>
+            {report.priority === "Positive" ? (
+              <span style={positiveBadgeStyle()}>✓ Positive</span>
+            ) : (
+              <span style={priorityBadgeStyle(report.priority)}>
+                {report.priority}
               </span>
             )}
           </div>
-        )}
-        <div
-          style={{
-            fontSize: 11,
-            color: theme.subtleText,
-            marginTop: 2,
-          }}
-        >
-          By {report.preparedBy} • {formatDateTime(report.createdAt) || "—"}
-        </div>
-      </div>
 
-      {/* Actions */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr 1fr",
-          gap: 6,
-          padding: "12px 14px",
-          borderTop: `1px solid ${theme.cardBorder}`,
-          background: theme.softCardBackground,
-        }}
-      >
-        <button
-          onClick={onView}
-          style={{ ...smallButtonStyle(), padding: "7px 6px", fontSize: 12 }}
-          title="View"
-        >
-          👁
-        </button>
-        <button
-          onClick={onEdit}
-          style={{ ...smallButtonStyle(), padding: "7px 6px", fontSize: 12 }}
-          title="Edit"
-        >
-          ✏️
-        </button>
-        <button
-          onClick={() => printReport(report)}
-          style={{ ...smallButtonStyle(), padding: "7px 6px", fontSize: 12 }}
-          title="Print"
-        >
-          🖨
-        </button>
-        <button
-          onClick={onDelete}
-          style={{
-            ...dangerButtonStyle(),
-            padding: "7px 6px",
-            fontSize: 12,
-          }}
-          title="Delete"
-        >
-          🗑
-        </button>
+          <div
+            onClick={onView}
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              color: theme.title,
+              cursor: "pointer",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {report.title || "(Untitled report)"}
+          </div>
+
+          <div
+            style={{
+              fontSize: 12,
+              color: theme.subtleText,
+              marginTop: 2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            🏬 {report.branchName} · 📅 {report.visitDate || "—"} · By{" "}
+            {report.preparedBy}
+          </div>
+
+          {obsCount > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 6,
+                marginTop: 6,
+              }}
+            >
+              {breakdown.needsImprovement > 0 && (
+                <span style={miniCountChip("needs")}>
+                  ⚠ {breakdown.needsImprovement} Needs Improvement
+                </span>
+              )}
+              {breakdown.positive > 0 && (
+                <span style={miniCountChip("positive")}>
+                  ✓ {breakdown.positive} Positive
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <button onClick={onView} style={iconBtn} title="View">
+            👁
+          </button>
+          <button onClick={onEdit} style={iconBtn} title="Edit">
+            ✏️
+          </button>
+          <button
+            onClick={() => printReport(report)}
+            style={iconBtn}
+            title="Print"
+          >
+            🖨
+          </button>
+          <button
+            onClick={onDelete}
+            style={{ ...iconBtn, ...dangerButtonStyle(), width: 34, height: 34, padding: 0 }}
+            title="Delete"
+          >
+            🗑
+          </button>
+        </div>
       </div>
     </div>
   );

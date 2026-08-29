@@ -52,7 +52,7 @@ html {
 
 /* ─── Reports page ──────────────────────────────────── */
 .reports-filter-grid    { grid-template-columns: 2fr 1fr 1fr 1fr 1fr; }
-.reports-stat-grid      { grid-template-columns: repeat(3, 1fr); }
+.reports-stat-grid      { grid-template-columns: repeat(4, 1fr); }
 .report-observation-row { grid-template-columns: 180px 1fr; }
 .report-info-grid       { grid-template-columns: repeat(3, 1fr); }
 .report-photo-grid {
