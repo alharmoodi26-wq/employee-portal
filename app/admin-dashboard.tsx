@@ -57,6 +57,14 @@ type DashboardTab = "dashboard" | "review" | "employees" | "hr" | "invoices" | "
 type HRSubTab = "attendance" | "ohc" | "foodSafety" | "passports" | "birthdays";
 type ReviewFilter = "pending" | "active" | "approved";
 
+// ── Temporarily disabled features ──────────────────────────────────────
+// These flags only hide/disable UI — all pages, logic, and data are kept
+// intact in the codebase. Flip a flag back to `true` to fully re-enable it.
+//   • REVIEW_FEATURE_ENABLED  — the "Review" entry in the sidebar & mobile nav
+//   • HR_ATTENDANCE_ENABLED    — the HR page's attendance card & sections
+const REVIEW_FEATURE_ENABLED: boolean = false;
+const HR_ATTENDANCE_ENABLED: boolean = false;
+
 type BirthdayEntry = {
   id: string;
   name: string;
@@ -1188,7 +1196,9 @@ export default function AdminDashboard({
   const [bulkSelectionMode, setBulkSelectionMode] = useState(false);
 
   const [activeTab, setActiveTab] = useState<DashboardTab>("dashboard");
-  const [hrSubTab, setHrSubTab] = useState<HRSubTab>("attendance");
+  const [hrSubTab, setHrSubTab] = useState<HRSubTab>(
+    HR_ATTENDANCE_ENABLED ? "attendance" : "ohc"
+  );
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("pending");
   const [employeeProfileTab, setEmployeeProfileTab] =
     useState<EmployeeProfileTab>("overview");
@@ -3460,7 +3470,9 @@ export default function AdminDashboard({
               { id: "assessments", icon: "📝", label: "Assessments", badge: 0 },
               { id: "reports",     icon: "📑", label: "Reports",     badge: 0 },
             ] as { id: DashboardTab; icon: string; label: string; badge: number }[]
-          ).map(({ id, icon, label, badge }) => (
+          )
+            .filter((item) => REVIEW_FEATURE_ENABLED || item.id !== "review")
+            .map(({ id, icon, label, badge }) => (
             <button
               key={id}
               style={{
@@ -4894,14 +4906,16 @@ export default function AdminDashboard({
             <div style={{ display: "grid", gap: 16 }}>
 
               {/* HR overview tiles — double as tab switcher */}
-              <div className="hr-overview-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
+              <div className="hr-overview-grid" style={{ display: "grid", gridTemplateColumns: `repeat(${HR_ATTENDANCE_ENABLED ? 5 : 4}, 1fr)`, gap: 12 }}>
                 {([
                   { id: "attendance" as HRSubTab, icon: "🕐", label: "Pending Attendance", value: pendingAttendanceCount, color: "#f59e0b" },
                   { id: "ohc"        as HRSubTab, icon: "⚕️", label: "OHC Alerts",          value: expiringSoonOHCCerts.length + expiredOHCCerts.length, color: "#ef4444" },
                   { id: "foodSafety" as HRSubTab, icon: "🥗", label: "Food Safety Alerts",  value: expiringSoonFS.length + expiredFS.length, color: "#0ea5e9" },
                   { id: "passports"  as HRSubTab, icon: "🛂", label: "Passport Alerts",      value: passportAlerts.length,  color: "#8b5cf6" },
                   { id: "birthdays"  as HRSubTab, icon: "🎂", label: "Birthdays",            value: birthdays.length,       color: "#ec4899" },
-                ] as { id: HRSubTab; icon: string; label: string; value: number; color: string }[]).map(({ id, icon, label, value, color }) => (
+                ] as { id: HRSubTab; icon: string; label: string; value: number; color: string }[])
+                  .filter(({ id }) => HR_ATTENDANCE_ENABLED || id !== "attendance")
+                  .map(({ id, icon, label, value, color }) => (
                   <button key={id} onClick={() => setHrSubTab(id)} style={{
                     background: hrSubTab === id ? `${color}14` : theme.cardBackground,
                     borderTop: `3px solid ${color}`,
@@ -4918,8 +4932,8 @@ export default function AdminDashboard({
                 ))}
               </div>
 
-              {/* ── Attendance ── */}
-              {hrSubTab === "attendance" && (
+              {/* ── Attendance ── (temporarily disabled via HR_ATTENDANCE_ENABLED) */}
+              {HR_ATTENDANCE_ENABLED && hrSubTab === "attendance" && (
                 <div style={{ display: "grid", gap: 14 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     {[
@@ -6433,7 +6447,7 @@ export default function AdminDashboard({
           { id: "employees",   label: "Employees",   icon: "👥" },
           { id: "hr",          label: "HR",          icon: "⚕️",  badge: pendingAttendanceCount },
           { id: "invoices",    label: "Invoices",    icon: "💰", badge: invoiceReviewItems.length },
-        ]}
+        ].filter((t) => REVIEW_FEATURE_ENABLED || t.id !== "review")}
       />
     </div>
   );
