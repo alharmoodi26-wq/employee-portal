@@ -1,5 +1,6 @@
 import { cert, getApps, initializeApp, type App, type ServiceAccount } from "firebase-admin/app";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
+import { getAuth, type DecodedIdToken } from "firebase-admin/auth";
 
 let cachedApp: App | null = null;
 let cachedDb: Firestore | null = null;
@@ -147,6 +148,25 @@ export function getAdminDb(): Firestore {
   if (cachedDb) return cachedDb;
   cachedDb = getFirestore(getAdminApp());
   return cachedDb;
+}
+
+/**
+ * Verifies the Firebase ID token carried in a request's `Authorization: Bearer`
+ * header. Returns the decoded token for authenticated callers, or `null` when
+ * the header is missing/invalid. Used to gate server-side AI endpoints so only
+ * signed-in users of this app can invoke the (paid) Gemini APIs.
+ */
+export async function verifyRequestAuth(
+  request: Request
+): Promise<DecodedIdToken | null> {
+  const header = request.headers.get("authorization") || "";
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  if (!match) return null;
+  try {
+    return await getAuth(getAdminApp()).verifyIdToken(match[1].trim());
+  } catch {
+    return null;
+  }
 }
 
 /**

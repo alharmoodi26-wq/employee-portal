@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
+import { verifyRequestAuth } from "../../../lib/firebase-admin";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -95,9 +96,9 @@ export async function POST(req: NextRequest) {
   const reqId = Math.random().toString(36).slice(2, 8);
   console.log(`[extract-bulk:${reqId}] start`);
 
-  const authHeader = req.headers.get("authorization") || "";
-  if (!authHeader.toLowerCase().startsWith("bearer ")) {
-    console.warn(`[extract-bulk:${reqId}] unauthorized`);
+  const caller = await verifyRequestAuth(req);
+  if (!caller) {
+    console.warn(`[extract-bulk:${reqId}] unauthorized: invalid or missing token`);
     return NextResponse.json({ code: "unauthorized" }, { status: 401 });
   }
 

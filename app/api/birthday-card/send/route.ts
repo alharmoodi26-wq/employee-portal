@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { verifyRequestAuth } from "../../../lib/firebase-admin";
 
 // Sends a birthday card by email via Resend (same provider the system already
 // uses in Firebase Functions). Requires RESEND_API_KEY and RESEND_FROM_EMAIL
@@ -7,6 +8,12 @@ const DEFAULT_FROM_TEXT = "ABU NADER GROUP OF COMPANIES MANAGEMENT & STAFF";
 
 export async function POST(request: Request) {
   try {
+    // Only signed-in users may send emails through this endpoint.
+    const caller = await verifyRequestAuth(request);
+    if (!caller) {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+
     const { to, name, birthday, imageBase64, mimeType, greeting } = await request.json();
 
     const approxBytes = typeof imageBase64 === "string"

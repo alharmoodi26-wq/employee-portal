@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { auth } from "./lib/firebase";
 import {
   buttonStyle,
   cardStyle,
@@ -11,58 +12,29 @@ import {
 } from "./portal-utils";
 
 // ── Settings (persisted in Firestore: config/birthdayCard) ───────────────
-export type CardTemplateId =
-  | "blue-balloons"
-  | "dark-blue"
-  | "gold"
-  | "green"
-  | "modern-corporate"
-  | "pink-balloons"
-  | "purple"
-  | "rose-gold"
-  | "floral"
-  | "elegant";
+// The settings types + defaults live in a lightweight, dependency-free module
+// so lean consumers (page.tsx) don't bundle this heavy renderer. Re-exported
+// here so existing importers keep working unchanged.
+import {
+  DEFAULT_BIRTHDAY_CARD_SETTINGS,
+  DEFAULT_GREETINGS,
+} from "./birthday-card-settings";
+import type {
+  BirthdayCardSettings,
+  CardTemplateId,
+} from "./birthday-card-settings";
 
-export type BirthdayCardSettings = {
-  fromText: string;
-  hrEmail: string; // where the internal HR notification is sent
-  defaultTemplate: CardTemplateId;
-  randomTemplate: boolean;
-  greetings: string[];
-  defaultGreeting: string;
-  randomGreeting: boolean;
-  // Legacy fields kept only so old Firestore documents keep spreading
-  // cleanly without crashing — no longer read by the UI.
-  companyName?: string;
-  logoDataUrl?: string;
-  defaultMessage?: string;
-  primaryColor?: string;
-  accentColor?: string;
-};
+export { DEFAULT_BIRTHDAY_CARD_SETTINGS } from "./birthday-card-settings";
+export type {
+  BirthdayCardSettings,
+  CardTemplateId,
+} from "./birthday-card-settings";
 
 export type BirthdayPerson = {
   name: string;
   birthday: string; // YYYY-MM-DD
   photoUrl?: string;
   gender?: "male" | "female";
-};
-
-const DEFAULT_GREETINGS: string[] = [
-  "Wishing you a wonderful birthday and a successful year ahead.",
-  "Happy Birthday! Wishing you happiness, health, and success.",
-  "Have an amazing birthday filled with joy and happiness.",
-  "Wishing you all the best on your special day.",
-  "May your birthday bring you happiness and success throughout the year.",
-];
-
-export const DEFAULT_BIRTHDAY_CARD_SETTINGS: BirthdayCardSettings = {
-  fromText: "ABU NADER GROUP OF COMPANIES MANAGEMENT & STAFF",
-  hrEmail: "",
-  defaultTemplate: "modern-corporate",
-  randomTemplate: true,
-  greetings: DEFAULT_GREETINGS,
-  defaultGreeting: DEFAULT_GREETINGS[0],
-  randomGreeting: true,
 };
 
 // ── Landscape canvas dimensions (A4 landscape) ────────────────────────────
@@ -1306,9 +1278,14 @@ export function BirthdayCardModal({
 
     setBusy("email");
     try {
+      const idToken = await auth.currentUser?.getIdToken();
+      if (!idToken) throw new Error("Please sign in again.");
       const res = await fetch("/api/birthday-card/send", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
         body: JSON.stringify({
           to: recipient.trim(),
           name: person.name,

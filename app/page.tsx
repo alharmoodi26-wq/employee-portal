@@ -27,14 +27,43 @@ import {
 } from "firebase/auth";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 
-import EmployeeDashboard from "./employee-dashboard";
-import AdminDashboard from "./admin-dashboard";
-import { AssessmentDraft } from "./admin-assessments";
-import { ReportDraft, SaveProgress } from "./admin-reports";
-import {
-  BirthdayCardSettings,
-  DEFAULT_BIRTHDAY_CARD_SETTINGS,
-} from "./birthday-card";
+import dynamic from "next/dynamic";
+import type { AssessmentDraft } from "./admin-assessments";
+import type { ReportDraft, SaveProgress } from "./admin-reports";
+import { DEFAULT_BIRTHDAY_CARD_SETTINGS } from "./birthday-card-settings";
+import type { BirthdayCardSettings } from "./birthday-card-settings";
+
+// Lazy-load the two dashboards so each session downloads only the UI it needs.
+// The admin bundle (dashboard + assessments + reports + birthday card) never
+// ships to employees, and the employee bundle never ships to admins — which
+// keeps the initial/login payload small. A given user only ever mounts one.
+function DashboardLoading() {
+  return (
+    <div
+      style={{
+        minHeight: "100dvh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#94a3b8",
+        fontSize: 14,
+        fontWeight: 600,
+        letterSpacing: "0.02em",
+      }}
+    >
+      Loading…
+    </div>
+  );
+}
+
+const AdminDashboard = dynamic(() => import("./admin-dashboard"), {
+  ssr: false,
+  loading: DashboardLoading,
+});
+const EmployeeDashboard = dynamic(() => import("./employee-dashboard"), {
+  ssr: false,
+  loading: DashboardLoading,
+});
 import {
   Assessment,
   AssessmentBranch,
@@ -931,7 +960,9 @@ export default function HomePage() {
   }, [currentUser, attendanceLimit]);
 
   useEffect(() => {
-    if (!currentUser) {
+    // HR data is admin-only — never subscribe (or hit Storage for photo URLs)
+    // for employee sessions, which would waste reads and trip security rules.
+    if (!currentUser || currentUser.role !== "admin") {
       setBirthdays([]);
       setLoadingBirthdays(false);
       return;
@@ -997,7 +1028,7 @@ export default function HomePage() {
 
   // Birthday-card settings (single config document — not employee data).
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || currentUser.role !== "admin") {
       setBirthdayCardSettings(DEFAULT_BIRTHDAY_CARD_SETTINGS);
       return;
     }
@@ -1019,7 +1050,7 @@ export default function HomePage() {
   }, [currentUser]);
 
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || currentUser.role !== "admin") {
       setOhcCertifications([]);
       setLoadingOHC(false);
       return;
@@ -1096,7 +1127,7 @@ export default function HomePage() {
   }, [currentUser]);
 
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || currentUser.role !== "admin") {
       setFoodSafetyCertifications([]);
       setLoadingFoodSafety(false);
       return;
@@ -1163,7 +1194,7 @@ export default function HomePage() {
   }, [currentUser]);
 
   useEffect(() => {
-    if (!currentUser) {
+    if (!currentUser || currentUser.role !== "admin") {
       setPassports([]);
       setLoadingPassports(false);
       return;

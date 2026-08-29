@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
+import { verifyRequestAuth } from "../../../lib/firebase-admin";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -79,9 +80,11 @@ export async function POST(req: NextRequest) {
   const reqId = Math.random().toString(36).slice(2, 8);
   console.log(`[assess-gen:${reqId}] start`);
 
-  const authHeader = req.headers.get("authorization") || "";
-  if (!authHeader.toLowerCase().startsWith("bearer ")) {
-    console.warn(`[assess-gen:${reqId}] unauthorized: missing bearer token`);
+  // Verify the caller's Firebase ID token (not just its presence) so only
+  // signed-in users of this app can invoke the paid Gemini API.
+  const caller = await verifyRequestAuth(req);
+  if (!caller) {
+    console.warn(`[assess-gen:${reqId}] unauthorized: invalid or missing token`);
     return NextResponse.json({ code: "unauthorized" }, { status: 401 });
   }
 
