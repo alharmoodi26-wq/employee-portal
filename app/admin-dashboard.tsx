@@ -62,8 +62,10 @@ type ReviewFilter = "pending" | "active" | "approved";
 // intact in the codebase. Flip a flag back to `true` to fully re-enable it.
 //   • REVIEW_FEATURE_ENABLED  — the "Review" entry in the sidebar & mobile nav
 //   • HR_ATTENDANCE_ENABLED    — the HR page's attendance card & sections
+//   • NOTIFICATIONS_ENABLED    — the "Notifications" bell in the sidebar
 const REVIEW_FEATURE_ENABLED: boolean = false;
 const HR_ATTENDANCE_ENABLED: boolean = false;
+const NOTIFICATIONS_ENABLED: boolean = false;
 
 type BirthdayEntry = {
   id: string;
@@ -3390,8 +3392,8 @@ export default function AdminDashboard({
           )}
         </div>
 
-        {/* Notifications bell */}
-        {!sidebarCollapsed && (
+        {/* Notifications bell — temporarily hidden via NOTIFICATIONS_ENABLED */}
+        {NOTIFICATIONS_ENABLED && !sidebarCollapsed && (
           <button
             onClick={() => setShowNotifications(v => !v)}
             style={{
@@ -3428,7 +3430,7 @@ export default function AdminDashboard({
             )}
           </button>
         )}
-        {sidebarCollapsed && (
+        {NOTIFICATIONS_ENABLED && sidebarCollapsed && (
           <button
             onClick={() => setShowNotifications(v => !v)}
             style={{
@@ -3687,12 +3689,11 @@ export default function AdminDashboard({
               }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: theme.subtleText, marginRight: 4 }}>Quick Actions:</span>
                 {[
-                  { label: "Review Queue", tab: "review" as DashboardTab,    icon: "📋", color: "#f59e0b", badge: pendingCount },
-                  { label: "Employees",    tab: "employees" as DashboardTab, icon: "👥", color: "#6366f1", badge: 0 },
-                  { label: "HR",           tab: "hr" as DashboardTab,        icon: "⚕️", color: "#ef4444", badge: ohcRenewalAlerts.length + fsRenewalAlerts.length + passportAlerts.length + todaysBirthdays.length },
-                  { label: "Invoices",     tab: "invoices" as DashboardTab,  icon: "🧾", color: "#8b5cf6", badge: invoiceReviewItems.length },
+                  { label: "HR",          tab: "hr" as DashboardTab,          icon: "🏢", color: "#ef4444", badge: ohcRenewalAlerts.length + fsRenewalAlerts.length + passportAlerts.length + todaysBirthdays.length },
+                  { label: "Reports",     tab: "reports" as DashboardTab,     icon: "📑", color: "#6366f1", badge: 0 },
+                  { label: "Invoices",    tab: "invoices" as DashboardTab,    icon: "🧾", color: "#8b5cf6", badge: invoiceReviewItems.length },
+                  { label: "Assessments", tab: "assessments" as DashboardTab, icon: "📝", color: "#10b981", badge: 0 },
                 ]
-                  .filter((a) => REVIEW_FEATURE_ENABLED || a.tab !== "review")
                   .map(({ label, tab, icon, color, badge }) => (
                   <button
                     key={tab}
