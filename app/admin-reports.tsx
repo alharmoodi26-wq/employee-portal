@@ -8,6 +8,7 @@ import {
   ReportPriority,
   ReportStatus,
   REPORT_BRANCHES,
+  REPORT_OVERALL_PRIORITIES,
   REPORT_PRIORITIES,
   REPORT_STATUSES,
   buttonStyle,
@@ -122,11 +123,19 @@ function priorityBadgeStyle(p: ReportPriority): React.CSSProperties {
       color: isDark ? "#fbbf24" : "#92400e",
       border: `1px solid ${isDark ? "rgba(245,158,11,0.35)" : "#fcd34d"}`,
     };
+  if (p === "Positive")
+    return {
+      ...base,
+      background: isDark ? "rgba(16,185,129,0.16)" : "#dcfce7",
+      color: isDark ? "#34d399" : "#166534",
+      border: `1px solid ${isDark ? "rgba(16,185,129,0.35)" : "#86efac"}`,
+    };
+  // Low — neutral slate (green is now reserved for "Positive").
   return {
     ...base,
-    background: isDark ? "rgba(16,185,129,0.16)" : "#dcfce7",
-    color: isDark ? "#34d399" : "#166534",
-    border: `1px solid ${isDark ? "rgba(16,185,129,0.35)" : "#86efac"}`,
+    background: isDark ? "rgba(100,116,139,0.18)" : "#f1f5f9",
+    color: isDark ? "#cbd5e1" : "#475569",
+    border: `1px solid ${isDark ? "rgba(100,116,139,0.35)" : "#e2e8f0"}`,
   };
 }
 
@@ -1239,7 +1248,7 @@ function ReportForm({
               }
               style={inputStyle()}
             >
-              {REPORT_PRIORITIES.map((p) => (
+              {REPORT_OVERALL_PRIORITIES.map((p) => (
                 <option key={p} value={p}>
                   {p}
                 </option>
@@ -2454,7 +2463,9 @@ function printReport(report: Report) {
     if (p === "Critical") return { bg: "#fee2e2", fg: "#991b1b", bd: "#fecaca" };
     if (p === "High") return { bg: "#ffedd5", fg: "#9a3412", bd: "#fed7aa" };
     if (p === "Medium") return { bg: "#fef3c7", fg: "#92400e", bd: "#fcd34d" };
-    return { bg: "#dcfce7", fg: "#166534", bd: "#86efac" };
+    if (p === "Positive") return { bg: "#dcfce7", fg: "#166534", bd: "#86efac" };
+    // Low — neutral slate (green is reserved for "Positive").
+    return { bg: "#f1f5f9", fg: "#475569", bd: "#e2e8f0" };
   };
   const statusColor = (s: ReportStatus) => {
     if (s === "Approved" || s === "Closed")
@@ -2491,6 +2502,7 @@ function printReport(report: Report) {
     High: 0,
     Medium: 0,
     Low: 0,
+    Positive: 0,
   };
   report.observations.forEach((o) => {
     if (getObservationType(o) === "Positive") return;
@@ -2986,7 +2998,7 @@ function printReport(report: Report) {
         </div>
         <div class="cover-badges">
           <span class="pill" style="background:${overallS.bg};color:${overallS.fg};border-color:${overallS.bd}">${escHtml(report.status)}</span>
-          <span class="pill" style="background:${overallP.bg};color:${overallP.fg};border-color:${overallP.bd}">${escHtml(report.priority)} Priority</span>
+          <span class="pill" style="background:${overallP.bg};color:${overallP.fg};border-color:${overallP.bd}">${escHtml(report.priority)}${report.priority === "Positive" ? "" : " Priority"}</span>
         </div>
         <div class="cover-conf">CONFIDENTIAL · INTERNAL USE</div>
       </div>

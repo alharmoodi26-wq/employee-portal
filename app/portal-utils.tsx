@@ -178,7 +178,12 @@ export type ReportStatus =
   | "Action Required"
   | "Closed";
 
-export type ReportPriority = "Low" | "Medium" | "High" | "Critical";
+export type ReportPriority =
+  | "Positive"
+  | "Low"
+  | "Medium"
+  | "High"
+  | "Critical";
 
 export type ReportBranch = "PS Muraqqabat" | "PS Karama";
 
@@ -260,7 +265,19 @@ export const REPORT_STATUSES: ReportStatus[] = [
   "Closed",
 ];
 
+// Per-observation priority options (unchanged — no "Positive" here; a positive
+// observation is expressed via its type, not its priority).
 export const REPORT_PRIORITIES: ReportPriority[] = [
+  "Low",
+  "Medium",
+  "High",
+  "Critical",
+];
+
+// Report-level "Overall Priority" options — includes "Positive" so an entire
+// visit can be flagged as a good/positive outcome.
+export const REPORT_OVERALL_PRIORITIES: ReportPriority[] = [
+  "Positive",
   "Low",
   "Medium",
   "High",

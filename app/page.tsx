@@ -1456,7 +1456,14 @@ export default function HomePage() {
     };
 
     const validPriority = (v: unknown): ReportPriority => {
-      if (v === "Low" || v === "Medium" || v === "High" || v === "Critical") return v;
+      if (
+        v === "Positive" ||
+        v === "Low" ||
+        v === "Medium" ||
+        v === "High" ||
+        v === "Critical"
+      )
+        return v;
       return "Medium";
     };
     const validStatus = (v: unknown): ReportStatus => {
