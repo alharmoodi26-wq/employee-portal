@@ -1730,6 +1730,14 @@ export default function AdminDashboard({
 
   const pendingAttendanceCount = pendingAttendanceOnly.length;
 
+  // Notification/badge counts that respect the temporarily-disabled features:
+  // hidden features contribute 0 so the bell badge and "all caught up" state
+  // stay consistent with what is actually shown.
+  const notifReviewCount = REVIEW_FEATURE_ENABLED ? pendingCount : 0;
+  const notifAttendanceCount = HR_ATTENDANCE_ENABLED ? pendingAttendanceCount : 0;
+  const notificationCount =
+    notifReviewCount + notifAttendanceCount + invoiceReviewItems.length;
+
   const selectedEmployeeWorks = selectedEmployee
     ? activeWorks.filter(
         (w) =>
@@ -3167,14 +3175,14 @@ export default function AdminDashboard({
             >×</button>
           </div>
           <div style={{ display: "grid", gap: 10 }}>
-            {pendingCount === 0 && pendingAttendanceCount === 0 && invoiceReviewItems.length === 0 ? (
+            {notificationCount === 0 ? (
               <div style={{ textAlign: "center", padding: 32, color: theme.subtleText, fontSize: 14 }}>
                 <div style={{ fontSize: 28, marginBottom: 10 }}>✅</div>
                 All caught up — no pending actions.
               </div>
             ) : (
               <>
-                {pendingReviewTasks.length > 0 && (
+                {REVIEW_FEATURE_ENABLED && pendingReviewTasks.length > 0 && (
                   <button onClick={() => { setActiveTab("review"); setReviewFilter("pending"); setShowNotifications(false); }}
                     style={{ ...notifItemStyle(theme), background: "rgba(99,102,241,0.08)" }}>
                     <span style={{ fontSize: 20 }}>📋</span>
@@ -3185,7 +3193,7 @@ export default function AdminDashboard({
                     <span style={{ marginLeft: "auto", fontSize: 11, color: "#6366f1", fontWeight: 800 }}>→</span>
                   </button>
                 )}
-                {pendingReviewWorks.length > 0 && (
+                {REVIEW_FEATURE_ENABLED && pendingReviewWorks.length > 0 && (
                   <button onClick={() => { setActiveTab("review"); setReviewFilter("pending"); setShowNotifications(false); }}
                     style={{ ...notifItemStyle(theme), background: "rgba(99,102,241,0.08)" }}>
                     <span style={{ fontSize: 20 }}>📁</span>
@@ -3196,7 +3204,7 @@ export default function AdminDashboard({
                     <span style={{ marginLeft: "auto", fontSize: 11, color: "#6366f1", fontWeight: 800 }}>→</span>
                   </button>
                 )}
-                {pendingAttendanceCount > 0 && (
+                {HR_ATTENDANCE_ENABLED && pendingAttendanceCount > 0 && (
                   <button onClick={() => { setActiveTab("hr"); setHrSubTab("attendance"); setShowNotifications(false); }}
                     style={{ ...notifItemStyle(theme), background: "rgba(245,158,11,0.08)" }}>
                     <span style={{ fontSize: 20 }}>🕐</span>
@@ -3405,7 +3413,7 @@ export default function AdminDashboard({
           >
             <span style={{ fontSize: 16 }}>🔔</span>
             <span>Notifications</span>
-            {(pendingCount + pendingAttendanceCount + invoiceReviewItems.length) > 0 && (
+            {notificationCount > 0 && (
               <span style={{
                 marginLeft: "auto",
                 background: "#ef4444",
@@ -3415,7 +3423,7 @@ export default function AdminDashboard({
                 fontSize: 11,
                 fontWeight: 800,
               }}>
-                {pendingCount + pendingAttendanceCount + invoiceReviewItems.length}
+                {notificationCount}
               </span>
             )}
           </button>
@@ -3439,7 +3447,7 @@ export default function AdminDashboard({
             }}
           >
             🔔
-            {(pendingCount + pendingAttendanceCount + invoiceReviewItems.length) > 0 && (
+            {notificationCount > 0 && (
               <span style={{
                 position: "absolute",
                 top: 2,
@@ -3452,7 +3460,7 @@ export default function AdminDashboard({
                 fontWeight: 800,
                 lineHeight: "16px",
               }}>
-                {pendingCount + pendingAttendanceCount + invoiceReviewItems.length}
+                {notificationCount}
               </span>
             )}
           </button>
@@ -3640,7 +3648,10 @@ export default function AdminDashboard({
                   { label: "Pending Attendance",  value: pendingAttendanceCount,       color: "#3b82f6", icon: "🕐", hint: "Awaiting review" },
                   { label: "OHC Alerts",          value: ohcRenewalAlerts.length,      color: "#ef4444", icon: "⚕️", hint: "Expiring certs" },
                   { label: "Invoices Due",        value: invoiceReviewItems.length,    color: "#8b5cf6", icon: "🧾", hint: "Need review" },
-                ].map(s => (
+                ]
+                  .filter((s) => REVIEW_FEATURE_ENABLED || s.label !== "Pending Review")
+                  .filter((s) => HR_ATTENDANCE_ENABLED || s.label !== "Pending Attendance")
+                  .map(s => (
                   <div key={s.label} style={{
                     background: theme.cardBackground,
                     borderTop: `3px solid ${s.color}`,
@@ -3680,7 +3691,9 @@ export default function AdminDashboard({
                   { label: "Employees",    tab: "employees" as DashboardTab, icon: "👥", color: "#6366f1", badge: 0 },
                   { label: "HR",           tab: "hr" as DashboardTab,        icon: "⚕️", color: "#ef4444", badge: ohcRenewalAlerts.length + fsRenewalAlerts.length + passportAlerts.length + todaysBirthdays.length },
                   { label: "Invoices",     tab: "invoices" as DashboardTab,  icon: "🧾", color: "#8b5cf6", badge: invoiceReviewItems.length },
-                ].map(({ label, tab, icon, color, badge }) => (
+                ]
+                  .filter((a) => REVIEW_FEATURE_ENABLED || a.tab !== "review")
+                  .map(({ label, tab, icon, color, badge }) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -3724,7 +3737,8 @@ export default function AdminDashboard({
                 />
               )}
 
-              {/* ── 2-column: Submitted Tasks + Pending Works ── */}
+              {/* ── 2-column: Submitted Tasks + Pending Works ── (Review previews) */}
+              {REVIEW_FEATURE_ENABLED && (
               <div className="two-col-split" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
 
                 {/* Submitted Tasks */}
@@ -3809,6 +3823,7 @@ export default function AdminDashboard({
                   </div>
                 </div>
               </div>
+              )}
 
               {/* ── Invoices Needing Review ── */}
               <div style={{
